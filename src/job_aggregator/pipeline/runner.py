@@ -12,7 +12,7 @@ from job_aggregator.config.schema import Config
 @dataclass
 class RunSummary:
     run_id: int
-    status: str            # 'success' | 'partial' | 'failed'
+    status: str  # 'success' | 'partial' | 'failed'
     n_sources_ok: int
     n_sources_err: int
     n_new: int

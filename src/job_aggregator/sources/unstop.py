@@ -1,4 +1,7 @@
-"""Unstop public JSON (India internships; read subtype not type; filter updated_at recency) (Phase 3)."""
+"""Unstop public JSON source (Phase 3).
+
+India internships: read `subtype` (not `type`) and filter on `updated_at` recency.
+"""
 
 from __future__ import annotations
 

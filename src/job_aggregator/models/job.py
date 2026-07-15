@@ -8,22 +8,22 @@ flags applied/bookmarked/hidden/notes) are added by storage.jobs_repo, NOT carri
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class JobStatus(str, Enum):
-    NEW = "new"          # inserted this cycle
-    ACTIVE = "active"    # seen in a recent successful cycle
-    STALE = "stale"      # not seen last cycle (soft), within grace window
+class JobStatus(StrEnum):
+    NEW = "new"  # inserted this cycle
+    ACTIVE = "active"  # seen in a recent successful cycle
+    STALE = "stale"  # not seen last cycle (soft), within grace window
     DELETED = "deleted"  # missing beyond grace window (soft-hidden, row kept)
 
 
-class SalaryBucket(str, Enum):
-    PASS = "pass"        # parsed AND meets threshold
+class SalaryBucket(StrEnum):
+    PASS = "pass"  # parsed AND meets threshold
     UNKNOWN = "unknown"  # not parseable -> KEEP + flag (most Indian internships)
-    FAIL = "fail"        # parsed AND below threshold -> dropped before insert
+    FAIL = "fail"  # parsed AND below threshold -> dropped before insert
 
 
 class Job(BaseModel):
@@ -39,10 +39,10 @@ class Job(BaseModel):
     url: str
     description: str | None = None
 
-    salary_min: int | None = None       # normalized INR/month
+    salary_min: int | None = None  # normalized INR/month
     salary_max: int | None = None
     salary_currency: str | None = None
-    salary_period: str | None = None    # 'month' | 'year' | 'hour'
+    salary_period: str | None = None  # 'month' | 'year' | 'hour'
     salary_raw: str | None = None
     salary_parsed: bool = False
     salary_bucket: SalaryBucket | None = None

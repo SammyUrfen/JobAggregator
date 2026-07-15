@@ -1,4 +1,6 @@
-"""Phase 3 — sources Tier C (greenhouse/lever/ashby/smartrecruiters) via respx; per-company loop + partial-success rule.
+"""Phase 3 — sources Tier C via respx.
+
+greenhouse/lever/ashby/smartrecruiters; per-company loop + partial-success rule.
 
 See PLAN.md Part II (Phase 3) for the exact table-driven cases to implement.
 """

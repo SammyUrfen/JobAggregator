@@ -62,7 +62,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["PLR2004", "S101"]
+# Deferred imports are deliberate here: cli.py keeps heavy deps lazy so `--help` runs on the
+# stdlib alone (see cli.py docstring), and test fixtures import Phase-scoped modules inside the
+# fixture body so collection never depends on unbuilt phases.
+"tests/*" = ["PLR2004", "S101", "PLC0415"]
+"src/job_aggregator/cli.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"

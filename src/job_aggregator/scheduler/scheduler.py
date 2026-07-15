@@ -9,6 +9,7 @@ connection (connections are not thread-safe to share).
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 from job_aggregator.clock import Clock
 
@@ -16,7 +17,7 @@ from job_aggregator.clock import Clock
 class JobScheduler:
     def __init__(
         self,
-        connect_fn: Callable[[], object],   # returns a fresh sqlite3.Connection per run
+        connect_fn: Callable[[], object],  # returns a fresh sqlite3.Connection per run
         clock: Clock,
     ) -> None:
         raise NotImplementedError("Phase 6: init APScheduler + lock")
@@ -34,3 +35,9 @@ class JobScheduler:
     def trigger_now(self, trigger: str = "manual") -> int | None:
         """Submit a run if none in progress; returns run_id or None if already running."""
         raise NotImplementedError("Phase 6: trigger now (locked)")
+
+    @property
+    def next_run_at(self) -> datetime | None:
+        """Scheduled time of the next daily cron fire, or None if not started. Drives the
+        dashboard header "next run" display (PLAN §7). Phase 6."""
+        raise NotImplementedError("Phase 6: next scheduled run time")

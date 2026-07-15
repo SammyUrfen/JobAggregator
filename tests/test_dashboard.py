@@ -1,4 +1,6 @@
-"""Phase 8 — dashboard via FastAPI TestClient: GET / /config /runs -> 200; POST /api/runs; job actions; config PUT validation.
+"""Phase 8 — dashboard via FastAPI TestClient.
+
+GET / /config /runs -> 200; POST /api/runs; job actions; config PUT validation.
 
 See PLAN.md Part II (Phase 8) for the exact table-driven cases to implement.
 """

@@ -4,12 +4,33 @@ from __future__ import annotations
 
 # Company suffixes stripped before hashing so "Acme Technologies Pvt Ltd" == "Acme".
 COMPANY_SUFFIXES = (
-    "inc", "inc.", "llc", "ltd", "ltd.", "pvt", "private limited", "llp",
-    "corp", "corporation", "technologies", "labs", "co", "gmbh",
+    "inc",
+    "inc.",
+    "llc",
+    "ltd",
+    "ltd.",
+    "pvt",
+    "private limited",
+    "llp",
+    "corp",
+    "corporation",
+    "technologies",
+    "labs",
+    "co",
+    "gmbh",
 )
 # Tracking query params dropped when canonicalizing URLs.
-TRACKING_PARAMS = ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-                   "gh_src", "ref", "source", "src")
+TRACKING_PARAMS = (
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "gh_src",
+    "ref",
+    "source",
+    "src",
+)
 FUZZY_THRESHOLD = 90  # rapidfuzz token_sort_ratio above which two titles are "the same"
 
 

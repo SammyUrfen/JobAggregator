@@ -1,4 +1,6 @@
-"""Phase 6 — scheduler.JobScheduler catch-up logic (FixedClock + fake runner) + run-lock prevents overlap.
+"""Phase 6 — scheduler.JobScheduler catch-up + run-lock.
+
+FixedClock + fake runner; run-lock prevents overlap.
 
 See PLAN.md Part II (Phase 6) for the exact table-driven cases to implement.
 """

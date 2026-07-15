@@ -1,4 +1,7 @@
-"""Phase 9 — docs/repo hygiene: README quickstart commands exist; ruff/mypy/pytest gates documented; no stray TODOs left as impl.
+"""Phase 9 — docs/repo hygiene.
+
+README quickstart commands exist; ruff/mypy/pytest gates documented; no stray
+TODOs left as impl.
 
 See PLAN.md Part II (Phase 9) for the exact cases to implement.
 """

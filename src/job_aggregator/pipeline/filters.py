@@ -8,7 +8,7 @@ from job_aggregator.config.schema import Config
 from job_aggregator.models.job import Job
 
 
-@dataclass
+@dataclass(frozen=True)
 class FilterVerdict:
     keep: bool
     score: float

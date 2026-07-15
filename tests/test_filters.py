@@ -1,4 +1,6 @@
-"""Phase 2 — pipeline.filters: score_and_filter hard drops (exclude/level/salary-fail/location) + scoring.
+"""Phase 2 — pipeline.filters: score_and_filter hard drops + scoring.
+
+Drops on exclude/level/salary-fail/location.
 
 See PLAN.md Part II (Phase 2) for the exact table-driven cases to implement.
 """

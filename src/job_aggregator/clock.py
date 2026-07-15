@@ -9,7 +9,7 @@ keeps the stale-delete grace-window tests exact (PLAN §4.5, Phase 5).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 
@@ -23,7 +23,7 @@ class SystemClock:
     """Production clock: real wall-clock time in UTC."""
 
     def now(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
 class FixedClock:
@@ -31,13 +31,11 @@ class FixedClock:
 
     def __init__(self, instant: datetime) -> None:
         if instant.tzinfo is None:
-            instant = instant.replace(tzinfo=timezone.utc)
+            instant = instant.replace(tzinfo=UTC)
         self._instant = instant
 
     def now(self) -> datetime:
         return self._instant
 
     def advance(self, *, seconds: float = 0, days: float = 0) -> None:
-        from datetime import timedelta
-
         self._instant = self._instant + timedelta(seconds=seconds, days=days)

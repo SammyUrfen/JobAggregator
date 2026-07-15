@@ -1,4 +1,6 @@
-"""Phase 5 — pipeline.stale.expire_stale: only succeeded sources expire; failed source untouched; grace stale->deleted.
+"""Phase 5 — pipeline.stale.expire_stale.
+
+only succeeded sources expire; failed source untouched; grace stale->deleted.
 
 See PLAN.md Part II (Phase 5) for the exact table-driven cases to implement.
 """

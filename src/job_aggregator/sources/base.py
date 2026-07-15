@@ -23,7 +23,7 @@ class RawPosting:
     """A raw source record before normalization. Adapters usually normalize inline and may
     not need this, but it's handy for staged pipelines and tests."""
 
-    payload: dict
+    payload: dict[str, object]
 
 
 @dataclass

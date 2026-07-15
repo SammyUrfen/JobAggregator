@@ -8,10 +8,10 @@ Phase 8). Sources must NOT let these escape `fetch()` — they convert failures 
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ErrorCode(str, Enum):
+class ErrorCode(StrEnum):
     """Stable machine-readable codes for the API error envelope."""
 
     CONFIG_INVALID = "config_invalid"
@@ -29,7 +29,7 @@ class JobAggregatorError(Exception):
 
     code: ErrorCode = ErrorCode.INTERNAL
 
-    def __init__(self, message: str, *, details: dict | None = None) -> None:
+    def __init__(self, message: str, *, details: dict[str, object] | None = None) -> None:
         super().__init__(message)
         self.message = message
         self.details = details or {}
@@ -56,3 +56,9 @@ class NotifyError(JobAggregatorError):
 
 class RunInProgressError(JobAggregatorError):
     code = ErrorCode.RUN_IN_PROGRESS
+
+
+class NotFoundError(JobAggregatorError):
+    """A requested entity (job, run, config) does not exist. Maps to HTTP 404."""
+
+    code = ErrorCode.NOT_FOUND

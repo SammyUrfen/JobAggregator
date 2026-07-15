@@ -1,4 +1,6 @@
-"""Phase 3 — sources Tier B (remoteok/himalayas/jobicy/adzuna/jooble/unstop) via respx + fixtures; suspicious-empty -> succeeded=False.
+"""Phase 3 — sources Tier B via respx + fixtures.
+
+remoteok/himalayas/jobicy/adzuna/jooble/unstop; suspicious-empty -> succeeded=False.
 
 See PLAN.md Part II (Phase 3) for the exact table-driven cases to implement.
 """
