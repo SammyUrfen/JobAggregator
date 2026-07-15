@@ -23,12 +23,15 @@ class Keywords(BaseModel):
 class SalaryConfig(BaseModel):
     currency: str = "INR"
     period: str = "month"
-    min_remote: int = 30000
-    min_in_office: int = 80000
+    # ge=0: negative floors are nonsense and the dashboard save-path relies on this rejection.
+    min_remote: int = Field(default=30000, ge=0)
+    min_in_office: int = Field(default=80000, ge=0)
     on_missing: Literal["keep_and_flag", "drop"] = "keep_and_flag"
     demote_in_office_if_unknown: bool = True
     # Approximate FX rates to normalize foreign pay to INR/month; user-updatable.
-    fx_rates: dict[str, float] = Field(default_factory=lambda: {"USD": 83.0, "EUR": 90.0, "GBP": 105.0})
+    fx_rates: dict[str, float] = Field(
+        default_factory=lambda: {"USD": 83.0, "EUR": 90.0, "GBP": 105.0}
+    )
 
 
 class ScheduleConfig(BaseModel):
