@@ -28,8 +28,8 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   `dashboard/static/css/theme.css`.
 
 ## Current status
-**Phases 0–4 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
-all clean; `pytest` 122 passed / 7 skipped). Done:
+**Phases 0–5 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
+all clean; `pytest` 141 passed / 5 skipped). Done:
 - **Phase 0** — foundation: package skeleton, `errors`/`clock`/`paths`/`logging`, tooling gate.
 - **Phase 1** — storage core: `storage/{db,jobs_repo,runs_repo,schema.sql}`, `models/job.py`,
   `config/{schema,store}` (idempotent upsert w/ user-flag preservation; run bookkeeping).
@@ -41,9 +41,13 @@ all clean; `pytest` 122 passed / 7 skipped). Done:
 - **Phase 4** — Tier A: `sources/jobspy_source.py` (`JobSpySource`, per-site `sub_results` guard,
   lazy `jobspy`/`pandas` behind the `_scrape_jobs` seam, salary→INR/month); wired into registry
   (Tier-A-first). Tests monkeypatch the seam (no network).
+- **Phase 5** — correctness core: `pipeline/stale.py` (per-source success guard) + `pipeline/runner.py`
+  (`run_cycle`: concurrent fetch → per-source record → filter → dedup-upsert → guarded stale-delete
+  → provisional notify). All DB writes on the main thread; input-order determinism. Tests over
+  `tests/_fakes.py` (`FakeSource`/`RaisingSource`/`RecordingNotifier`).
 
-**Remaining: Phases 5–9** — stubs still raise `NotImplementedError("Phase N: ...")`. Build in
-order per PLAN.md Part II. Next: Phase 5 (pipeline runner + stale-delete — THE heart).
+**Remaining: Phases 6–9** — stubs still raise `NotImplementedError("Phase N: ...")`. Build in
+order per PLAN.md Part II. Next: Phase 6 (scheduler + CLI wiring — first live end-to-end cycle).
 
 ## Conventions (the user's — honor them)
 - **ruff** (lint+format) + **mypy** strict + **pytest** must be green before "done".
