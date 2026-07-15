@@ -69,6 +69,8 @@ ignore = [
 "src/job_aggregator/cli.py" = ["PLC0415"]
 # jobspy/pandas are imported lazily inside _scrape_jobs so the CLI stays importable without them.
 "src/job_aggregator/sources/jobspy_source.py" = ["PLC0415"]
+# runner defers source-registry + notifier imports (break import weight / Phase-7 coupling).
+"src/job_aggregator/pipeline/runner.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"

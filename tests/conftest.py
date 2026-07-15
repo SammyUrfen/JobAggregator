@@ -137,11 +137,16 @@ def cfg() -> Config:
 
 @pytest.fixture
 def sample_config() -> Config:
-    """The default seed config as a validated Config. Requires config.schema (contract)."""
+    """A PERMISSIVE config for runner/stale tests: require_level=False so fakes without a level
+    keyword still pass, keep-and-flag missing salary, grace_days=3. Exclude list stays active."""
     import yaml
 
     from job_aggregator.config.schema import Config
     from job_aggregator.paths import DEFAULT_CONFIG_YAML
 
     data = yaml.safe_load(DEFAULT_CONFIG_YAML.read_text())
-    return Config.model_validate(data)
+    cfg = Config.model_validate(data)
+    cfg.keywords.require_level = False
+    cfg.salary.on_missing = "keep_and_flag"
+    cfg.schedule.grace_days = 3
+    return cfg

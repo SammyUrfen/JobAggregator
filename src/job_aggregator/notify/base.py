@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from job_aggregator.config.schema import Config
 from job_aggregator.models.job import Job
+
+if TYPE_CHECKING:
+    from job_aggregator.clock import Clock
 
 
 class Notifier(ABC):
@@ -15,6 +19,6 @@ class Notifier(ABC):
         raise NotImplementedError
 
 
-def build_notifiers(cfg: Config) -> list[Notifier]:
-    """Instantiate enabled notifiers from cfg.notify. Phase 7."""
+def build_notifiers(cfg: Config, clock: Clock) -> list[Notifier]:
+    """Instantiate enabled notifiers from cfg.notify (clock feeds RSS timestamps). Phase 7."""
     raise NotImplementedError("Phase 7: build notifiers")
