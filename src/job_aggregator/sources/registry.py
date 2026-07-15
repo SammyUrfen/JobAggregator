@@ -17,6 +17,7 @@ from job_aggregator.sources.ats_lever import LeverSource
 from job_aggregator.sources.ats_smartrecruiters import SmartRecruitersSource
 from job_aggregator.sources.himalayas import HimalayasSource
 from job_aggregator.sources.jobicy import JobicySource
+from job_aggregator.sources.jobspy_source import JobSpySource
 from job_aggregator.sources.jooble import JoobleSource
 from job_aggregator.sources.remoteok import RemoteOkSource
 from job_aggregator.sources.unstop import UnstopSource
@@ -50,6 +51,10 @@ def build_enabled_sources(cfg: Config) -> list[Source]:
     s = cfg.sources
     out: list[Source] = []
 
+    # Tier A first so its (Naukri/LinkedIn) URLs win first-seen provenance, and Tier A precedes
+    # Tier C for the runner's stable input order.
+    if s.jobspy.enabled:
+        out.append(JobSpySource())
     if s.remoteok.enabled:
         out.append(RemoteOkSource())
     if s.himalayas.enabled:

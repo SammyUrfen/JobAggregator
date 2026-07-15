@@ -67,6 +67,8 @@ ignore = [
 # fixture body so collection never depends on unbuilt phases.
 "tests/*" = ["PLR2004", "S101", "PLC0415"]
 "src/job_aggregator/cli.py" = ["PLC0415"]
+# jobspy/pandas are imported lazily inside _scrape_jobs so the CLI stays importable without them.
+"src/job_aggregator/sources/jobspy_source.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -81,7 +83,7 @@ namespace_packages = true
 mypy_path = "src"
 # jobspy / apscheduler ship without full type stubs; allow untyped imports for those only.
 [[tool.mypy.overrides]]
-module = ["jobspy.*", "apscheduler.*"]
+module = ["jobspy.*", "apscheduler.*", "pandas", "pandas.*"]
 ignore_missing_imports = true
 
 # ── Pytest ──
