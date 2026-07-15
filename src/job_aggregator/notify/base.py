@@ -20,5 +20,10 @@ class Notifier(ABC):
 
 
 def build_notifiers(cfg: Config, clock: Clock) -> list[Notifier]:
-    """Instantiate enabled notifiers from cfg.notify (clock feeds RSS timestamps). Phase 7."""
-    raise NotImplementedError("Phase 7: build notifiers")
+    """Instantiate enabled notifiers from cfg.notify (clock feeds RSS timestamps).
+
+    No-op until Phase 7 wires the concrete notifiers (telegram/email/rss): returns an empty list
+    so the runner's step-8 notify completes cleanly. The runner is already reachable here (Phase
+    5/6), so this must NOT raise.
+    """
+    return []

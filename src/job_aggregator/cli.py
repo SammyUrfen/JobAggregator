@@ -14,21 +14,24 @@ stdlib present — i.e. before `pip install -e .[dev]`. Do not add top-level hea
 from __future__ import annotations
 
 import argparse
+import sys
 
 from job_aggregator import __version__
+from job_aggregator.errors import JobAggregatorError
 
 
 def cmd_initdb(args: argparse.Namespace) -> int:
-    """Create the DB and seed the config row. Implemented in Phase 1."""
+    """Create the DB (schema + seed config row from default_config.yaml)."""
+    from pathlib import Path
+
+    from job_aggregator.config.store import seed_from_yaml
     from job_aggregator.logging_setup import configure_logging
     from job_aggregator.storage.db import connect, init_db
 
     configure_logging(args.log_level)
+    Path(args.db).parent.mkdir(parents=True, exist_ok=True)
     conn = connect(args.db)
     init_db(conn)
-    # Phase 1: seed config via config.store.seed_from_yaml(conn, default_config_path)
-    from job_aggregator.config.store import seed_from_yaml
-
     seed_from_yaml(conn)
     print(f"initialized database at {args.db}")
     return 0
@@ -51,12 +54,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    """Launch the dashboard. Implemented in Phase 8."""
+    """Launch the dashboard (which owns the daily scheduler). Implemented in Phase 8."""
     import uvicorn
 
     from job_aggregator.logging_setup import configure_logging
 
     configure_logging(args.log_level)
+    # Single process ONLY — never `--workers N`: each worker would spin up its own scheduler,
+    # firing the daily cycle N times. The dashboard's lifespan owns exactly one JobScheduler.
     uvicorn.run(
         "job_aggregator.dashboard.app:create_app",
         factory=True,
@@ -81,35 +86,58 @@ def cmd_show_config(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     from job_aggregator.paths import default_db_path
 
+    # Shared options live on a parent parser so they are accepted AFTER the subcommand
+    # (e.g. `job-aggregator initdb --db X`), matching the documented CLI usage.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--db", default=str(default_db_path()), help="path to the SQLite DB")
+    common.add_argument("--log-level", default="INFO", help="logging level (default: INFO)")
+
     parser = argparse.ArgumentParser(
         prog="job-aggregator",
         description="Self-hosted multi-source job/internship aggregator.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("--db", default=str(default_db_path()), help="path to the SQLite DB")
-    parser.add_argument("--log-level", default="INFO", help="logging level (default: INFO)")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_init = sub.add_parser("initdb", help="create and seed the database")
+    p_init = sub.add_parser("initdb", help="create and seed the database", parents=[common])
     p_init.set_defaults(func=cmd_initdb)
 
-    p_run = sub.add_parser("run", help="execute one aggregation cycle now")
+    p_run = sub.add_parser("run", help="execute one aggregation cycle now", parents=[common])
     p_run.set_defaults(func=cmd_run)
 
-    p_serve = sub.add_parser("serve", help="launch the dashboard web app")
+    p_serve = sub.add_parser("serve", help="launch the dashboard web app", parents=[common])
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
     p_serve.add_argument("--reload", action="store_true", help="uvicorn autoreload (dev)")
     p_serve.set_defaults(func=cmd_serve)
 
-    p_show = sub.add_parser("show-config", help="print the effective config")
+    p_show = sub.add_parser("show-config", help="print the effective config", parents=[common])
     p_show.set_defaults(func=cmd_show_config)
 
     return parser
 
 
+def _load_env() -> None:
+    """Load .env into os.environ if python-dotenv is present (secrets: Adzuna/Jooble/SMTP/...).
+    Done AFTER parse_args so `--help`/`--version` stay stdlib-only."""
+    try:
+        from dotenv import load_dotenv
+    except ModuleNotFoundError:
+        return
+    load_dotenv()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return int(args.func(args))
+    _load_env()
+    try:
+        return int(args.func(args))
+    except JobAggregatorError as exc:
+        # Known application errors -> terse {code, message, details} envelope. Unexpected
+        # exceptions propagate with a traceback (an honest bug failure).
+        print(f"error [{exc.code.value}]: {exc.message}", file=sys.stderr)
+        if exc.details:
+            print(f"  details: {exc.details}", file=sys.stderr)
+        return 1

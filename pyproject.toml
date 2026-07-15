@@ -71,6 +71,8 @@ ignore = [
 "src/job_aggregator/sources/jobspy_source.py" = ["PLC0415"]
 # runner defers source-registry + notifier imports (break import weight / Phase-7 coupling).
 "src/job_aggregator/pipeline/runner.py" = ["PLC0415"]
+# scheduler defers apscheduler + config/runner/repo imports into method bodies (see module docs).
+"src/job_aggregator/scheduler/scheduler.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"
