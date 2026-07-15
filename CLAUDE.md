@@ -28,10 +28,19 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   `dashboard/static/css/theme.css`.
 
 ## Current status
-**Scaffold complete + verified** (tree, real contracts, stubs, config, theme, tests). CLI
-skeleton runs on stdlib alone. **Phases 0–9 are unimplemented** — stubs raise
-`NotImplementedError("Phase N: ...")`. Build them in order per PLAN.md Part II. Suggested
-first move: `pip install -e ".[dev]"`, then Phase 1 (storage) → Phase 2 (pure logic) → up.
+**Phases 0–3 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
+all clean; `pytest` 110 passed / 8 skipped). Done:
+- **Phase 0** — foundation: package skeleton, `errors`/`clock`/`paths`/`logging`, tooling gate.
+- **Phase 1** — storage core: `storage/{db,jobs_repo,runs_repo,schema.sql}`, `models/job.py`,
+  `config/{schema,store}` (idempotent upsert w/ user-flag preservation; run bookkeeping).
+- **Phase 2** — pure pipeline: `pipeline/{dedup,salary,filters,normalize}` (content-hash uid,
+  INR/month salary, keyword scoring, `build_job`).
+- **Phase 3** — sources: `sources/_http.py` (retry/backoff), `base.py` (`to_job`/`build_result`/
+  `run_ats`), Tier-B (remoteok/himalayas/jobicy/adzuna/jooble/unstop) + Tier-C ATS
+  (greenhouse/lever/ashby/smartrecruiters) + `registry.py`; respx-mocked tests + JSON fixtures.
+
+**Remaining: Phases 4–9** — stubs still raise `NotImplementedError("Phase N: ...")`. Build in
+order per PLAN.md Part II. Next: Phase 4 (JobSpy Tier A) → 5 (runner + stale-delete) → up.
 
 ## Conventions (the user's — honor them)
 - **ruff** (lint+format) + **mypy** strict + **pytest** must be green before "done".
