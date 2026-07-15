@@ -28,8 +28,8 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   `dashboard/static/css/theme.css`.
 
 ## Current status
-**Phases 0–5 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
-all clean; `pytest` 141 passed / 5 skipped). Done:
+**Phases 0–6 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
+all clean; `pytest` 156 passed / 3 skipped; one **live end-to-end cycle** writes+dedups jobs). Done:
 - **Phase 0** — foundation: package skeleton, `errors`/`clock`/`paths`/`logging`, tooling gate.
 - **Phase 1** — storage core: `storage/{db,jobs_repo,runs_repo,schema.sql}`, `models/job.py`,
   `config/{schema,store}` (idempotent upsert w/ user-flag preservation; run bookkeeping).
@@ -45,9 +45,14 @@ all clean; `pytest` 141 passed / 5 skipped). Done:
   (`run_cycle`: concurrent fetch → per-source record → filter → dedup-upsert → guarded stale-delete
   → provisional notify). All DB writes on the main thread; input-order determinism. Tests over
   `tests/_fakes.py` (`FakeSource`/`RaisingSource`/`RecordingNotifier`).
+- **Phase 6** — self-driving: `scheduler/scheduler.py` (`JobScheduler`: APScheduler `BackgroundScheduler`
+  daily cron + startup catch-up on last-**success** + non-blocking lock funnel) and finalized `cli.py`
+  (`initdb`/`run`/`serve`/`show-config`; shared-parent `--db`/`--log-level` after the subcommand;
+  `.env` load post-parse; error-hierarchy → `{code,message}` envelope). `notify.base.build_notifiers`
+  is a no-op `[]` until Phase 7 (was raising and crashing `run` once new jobs appeared).
 
-**Remaining: Phases 6–9** — stubs still raise `NotImplementedError("Phase N: ...")`. Build in
-order per PLAN.md Part II. Next: Phase 6 (scheduler + CLI wiring — first live end-to-end cycle).
+**Remaining: Phases 7–9** — stubs still raise `NotImplementedError("Phase N: ...")`. Build in
+order per PLAN.md Part II. Next: Phase 7 (notifications: telegram/email/rss + runner step-8 finalize).
 
 ## Conventions (the user's — honor them)
 - **ruff** (lint+format) + **mypy** strict + **pytest** must be green before "done".
