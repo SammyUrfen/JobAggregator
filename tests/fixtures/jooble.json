@@ -1,0 +1,13 @@
+{
+  "jobs": [
+    {
+      "id": "j1",
+      "title": "Backend Intern",
+      "company": "Acme",
+      "link": "https://jooble.org/away/1",
+      "location": "Remote",
+      "snippet": "Work on backend services.",
+      "updated": "2026-07-10T00:00:00Z"
+    }
+  ]
+}

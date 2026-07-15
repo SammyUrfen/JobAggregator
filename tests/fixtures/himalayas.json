@@ -1,0 +1,16 @@
+{
+  "jobs": [
+    {
+      "guid": "h1",
+      "title": "Backend Engineering Intern",
+      "companyName": "Acme",
+      "applicationLink": "https://acme.example/jobs/1",
+      "locationRestrictions": ["India"],
+      "minSalary": 2000000,
+      "maxSalary": 3000000,
+      "currency": "INR",
+      "salaryPeriod": "annual",
+      "pubDate": 1720000000
+    }
+  ]
+}

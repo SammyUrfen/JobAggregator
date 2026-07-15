@@ -1,0 +1,12 @@
+{
+  "content": [
+    {
+      "id": "sr1",
+      "name": "Backend Intern",
+      "company": { "name": "Acme" },
+      "ref": "https://api.smartrecruiters.com/v1/companies/acme/postings/sr1",
+      "location": { "city": "Bengaluru", "country": "India", "remote": true },
+      "releasedDate": "2026-07-10T00:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "jobs": [
+    {
+      "id": 401,
+      "title": "Backend Engineering Intern",
+      "company_name": "Acme",
+      "location": { "name": "Remote - India" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/401",
+      "content": "Backend internship.",
+      "updated_at": "2026-07-10T00:00:00Z"
+    },
+    {
+      "id": 402,
+      "title": "Platform Intern",
+      "location": { "name": "Bengaluru" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/402",
+      "content": "Platform internship.",
+      "updated_at": "2026-07-11T00:00:00Z"
+    }
+  ]
+}

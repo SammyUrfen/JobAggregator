@@ -1,0 +1,14 @@
+[
+  { "legal": "In exchange for API access you agree to link back to RemoteOK." },
+  {
+    "id": 123456,
+    "position": "Backend Engineer Intern",
+    "company": "Acme",
+    "url": "https://REMOTEOK.com/remote-jobs/123456",
+    "location": "Remote",
+    "description": "Build backend services.",
+    "salary_min": 0,
+    "salary_max": 0,
+    "date": "2026-07-10T00:00:00+00:00"
+  }
+]

@@ -1,0 +1,30 @@
+{
+  "jobs": [
+    {
+      "id": 501,
+      "jobTitle": "Machine Learning Intern",
+      "companyName": "Acme",
+      "url": "https://jobicy.com/jobs/501",
+      "jobGeo": "Anywhere",
+      "jobType": ["Internship"],
+      "salaryMin": 0,
+      "salaryMax": 0,
+      "salaryCurrency": "USD",
+      "salaryPeriod": "annual",
+      "pubDate": "2026-07-01T00:00:00Z"
+    },
+    {
+      "id": 502,
+      "jobTitle": "Senior Data Engineer",
+      "companyName": "Beta",
+      "url": "https://jobicy.com/jobs/502",
+      "jobGeo": "USA",
+      "jobType": ["Full-Time"],
+      "salaryMin": 120000,
+      "salaryMax": 160000,
+      "salaryCurrency": "USD",
+      "salaryPeriod": "annual",
+      "pubDate": "2026-07-01T00:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "id": "ash1",
+      "title": "Machine Learning Intern",
+      "organizationName": "Acme",
+      "jobUrl": "https://jobs.ashbyhq.com/Acme/ash1",
+      "location": "Remote",
+      "isRemote": true,
+      "isListed": true,
+      "publishedAt": "2026-07-10T00:00:00Z",
+      "compensation": {
+        "summaryComponents": [
+          {
+            "compensationType": "Salary",
+            "minValue": 2000000,
+            "maxValue": 3000000,
+            "currencyCode": "INR",
+            "interval": "1 YEAR"
+          }
+        ]
+      }
+    }
+  ]
+}

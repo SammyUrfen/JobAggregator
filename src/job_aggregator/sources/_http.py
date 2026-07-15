@@ -1,19 +1,51 @@
-"""Shared httpx client + resilient JSON GET/POST (Phase 3)."""
+"""Shared HTTP transport policy (Phase 3): one browser-UA client + a manual retry/backoff loop.
+
+httpx's transport-level `retries=` only retries connection errors — never status codes — so 429
+and 5xx handling is done here explicitly (honoring a numeric Retry-After, capped). `sleep` is
+injectable so tests never actually wait. Adapters catch the SourceError this raises and convert
+it into a failed SourceResult (fetch never raises).
+"""
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
 
-DEFAULT_TIMEOUT = 20.0  # seconds; sources are I/O bound, keep generous but bounded
-MAX_RETRIES = 3  # retry on 429/5xx with exponential backoff
-USER_AGENT = "job-aggregator/0.1 (+personal use)"
+from job_aggregator.errors import SourceError
+
+# Several sources (RemoteOK, Himalayas, Unstop) 403 without a real browser UA.
+BROWSER_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0.0.0 Safari/537.36 JobAggregator/0.1 "
+    "(+self-hosted; contact bibekcharah@gmail.com)"
+)
+DEFAULT_TIMEOUT_S = 20.0  # sources are I/O bound; generous but bounded
+DEFAULT_CONNECT_S = 10.0
+DEFAULT_MAX_RETRIES = 3
+BASE_BACKOFF_S = 0.5  # exponential base: 0.5, 1.0, 2.0, ...
+MAX_RETRY_AFTER_S = 30.0  # never obey an absurd Retry-After
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
-def make_client(timeout: float = DEFAULT_TIMEOUT) -> httpx.Client:
-    """Build a configured sync httpx.Client (timeout, UA header). Phase 3."""
-    raise NotImplementedError("Phase 3: configured httpx client")
+def make_client(*, timeout: float | None = None) -> httpx.Client:
+    """Build a configured sync httpx.Client (browser UA, JSON Accept, redirects, timeouts)."""
+    t = httpx.Timeout(timeout or DEFAULT_TIMEOUT_S, connect=DEFAULT_CONNECT_S)
+    return httpx.Client(
+        timeout=t,
+        follow_redirects=True,
+        headers={"User-Agent": BROWSER_UA, "Accept": "application/json"},
+    )
+
+
+def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+    """Numeric Retry-After (capped), else exponential backoff for this attempt."""
+    ra = resp.headers.get("Retry-After")
+    if ra and ra.strip().isdigit():
+        return min(float(ra), MAX_RETRY_AFTER_S)
+    return float(BASE_BACKOFF_S * (2**attempt))
 
 
 def get_json(
@@ -23,8 +55,41 @@ def get_json(
     params: dict[str, Any] | None = None,
     method: str = "GET",
     json_body: dict[str, Any] | None = None,
-    max_retries: int = MAX_RETRIES,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> Any:
-    """GET/POST JSON with retry/backoff on 429 + 5xx. Raises SourceError on final failure
-    (the caller adapter converts it into a failed SourceResult). Phase 3."""
-    raise NotImplementedError("Phase 3: JSON fetch with retry/backoff")
+    """Fetch + JSON-decode with retry on connect/read errors and 429/5xx.
+
+    Raises SourceError on give-up, a non-retryable status (400/401/403/404), or a JSON decode
+    failure. A terminal 404 (e.g. an invalid ATS slug) is NOT retried.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            resp = client.request(method, url, params=params, json=json_body)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                raise SourceError(
+                    f"network error for {url}", details={"url": url, "error": str(exc)}
+                ) from exc
+            sleep(BASE_BACKOFF_S * (2**attempt))
+            continue
+        status = resp.status_code
+        if status in RETRYABLE_STATUS:
+            if attempt == max_retries:
+                raise SourceError(
+                    f"HTTP {status} (retries exhausted) for {url}",
+                    details={"url": url, "status": status},
+                )
+            sleep(_retry_delay(resp, attempt))
+            continue
+        if 200 <= status < 300:
+            try:
+                return resp.json()
+            except ValueError as exc:
+                raise SourceError(
+                    f"invalid JSON from {url}", details={"url": url, "error": str(exc)}
+                ) from exc
+        raise SourceError(f"HTTP {status} for {url}", details={"url": url, "status": status})
+    raise SourceError(f"request failed for {url}", details={"url": url}) from last_exc

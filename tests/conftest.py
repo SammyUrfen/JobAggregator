@@ -8,11 +8,12 @@ fixtures (clock/conn/run_id/make_job).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -24,6 +25,9 @@ if TYPE_CHECKING:
 
 # A single fixed instant anchors every time-dependent test so ISO timestamps are reproducible.
 FIXED_INSTANT = datetime(2026, 1, 1, tzinfo=UTC)
+# A later "now" used by Phase 3 source tests (recency filters compare against this).
+FIXED_NOW = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -96,6 +100,22 @@ def make_job() -> Callable[..., Job]:
         return Job.model_validate(defaults)
 
     return _make
+
+
+@pytest.fixture
+def now_clock() -> FixedClock:
+    """A deterministic clock anchored at FIXED_NOW (Phase 3 source tests)."""
+    return FixedClock(FIXED_NOW)
+
+
+@pytest.fixture
+def load_fixture() -> Callable[[str], Any]:
+    """Load a recorded JSON response from tests/fixtures/ by filename."""
+
+    def _load(name: str) -> Any:
+        return json.loads((FIXTURES_DIR / name).read_text())
+
+    return _load
 
 
 @pytest.fixture

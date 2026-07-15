@@ -1,0 +1,15 @@
+{
+  "results": [
+    {
+      "id": "adz1",
+      "title": "Backend Intern",
+      "company": { "display_name": "Acme" },
+      "location": { "display_name": "Bengaluru, India" },
+      "redirect_url": "https://www.adzuna.in/land/ad/123?utm_medium=api&utm_source=partner",
+      "description": "Backend internship.",
+      "salary_min": 30000.0,
+      "salary_max": 50000.0,
+      "created": "2026-07-10T00:00:00Z"
+    }
+  ]
+}

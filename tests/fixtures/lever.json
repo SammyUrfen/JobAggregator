@@ -1,0 +1,11 @@
+[
+  {
+    "id": "lv1",
+    "text": "Backend Engineer Intern",
+    "hostedUrl": "https://jobs.lever.co/acme/lv1",
+    "workplaceType": "remote",
+    "categories": { "location": "Remote" },
+    "salaryRange": { "min": 2000000, "max": 3000000, "currency": "INR", "interval": "per-year-salary" },
+    "createdAt": 1720000000000
+  }
+]
