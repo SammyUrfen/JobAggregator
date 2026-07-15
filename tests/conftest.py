@@ -99,6 +99,23 @@ def make_job() -> Callable[..., Job]:
 
 
 @pytest.fixture
+def fx_rates() -> dict[str, float]:
+    """The default approximate FX table (INR per 1 unit), for salary conversion tests."""
+    return {"USD": 83.0, "EUR": 90.0, "GBP": 105.0}
+
+
+@pytest.fixture
+def cfg() -> Config:
+    """The default seed config as a validated Config (Phase 2+ alias of sample_config)."""
+    import yaml
+
+    from job_aggregator.config.schema import Config
+    from job_aggregator.paths import DEFAULT_CONFIG_YAML
+
+    return Config.model_validate(yaml.safe_load(DEFAULT_CONFIG_YAML.read_text()))
+
+
+@pytest.fixture
 def sample_config() -> Config:
     """The default seed config as a validated Config. Requires config.schema (contract)."""
     import yaml

@@ -5,10 +5,78 @@ Drops on exclude/level/salary-fail/location.
 See PLAN.md Part II (Phase 2) for the exact table-driven cases to implement.
 """
 
-import pytest
+from __future__ import annotations
 
-pytestmark = pytest.mark.skip(reason="Phase 2: not yet implemented (scaffold placeholder)")
+from collections.abc import Callable
+
+from job_aggregator.config.schema import Config
+from job_aggregator.models.job import Job, SalaryBucket
+from job_aggregator.pipeline.filters import score_and_filter
+
+JobFactory = Callable[..., Job]
 
 
-def test_placeholder() -> None:
-    raise NotImplementedError("Phase 2")
+def test_hard_drop_exclude_keyword(make_job: JobFactory, cfg: Config) -> None:
+    job = make_job(title="Senior Backend Engineer")
+    verdict = score_and_filter(job, cfg)
+    assert verdict.keep is False
+    assert verdict.reasons == ["excluded:senior"]
+
+
+def test_hard_drop_no_level(make_job: JobFactory, cfg: Config) -> None:
+    job = make_job(title="Backend Engineer", description="build APIs")
+    verdict = score_and_filter(job, cfg)
+    assert verdict.keep is False
+    assert verdict.reasons == ["no_level"]
+
+
+def test_hard_drop_no_role(make_job: JobFactory, cfg: Config) -> None:
+    job = make_job(title="Marketing Intern", description="run social campaigns")
+    verdict = score_and_filter(job, cfg)
+    assert verdict.keep is False
+    assert verdict.reasons == ["no_role_match"]
+
+
+def test_keep_full_score(make_job: JobFactory, cfg: Config) -> None:
+    job = make_job(
+        title="Backend Engineer Intern",
+        is_remote=True,
+        description="Go and Kubernetes, distributed systems",
+        salary_bucket=SalaryBucket.PASS,
+    )
+    verdict = score_and_filter(job, cfg)
+    assert verdict.keep is True
+    # 10 role-title + 3 role-desc(distributed systems) + 8 bonus(Go, Kubernetes) + 5 remote + 6 PASS
+    assert verdict.score == 32.0
+
+
+def test_hard_drop_salary_fail(make_job: JobFactory, cfg: Config) -> None:
+    job = make_job(
+        title="Backend Engineer Intern", is_remote=False, salary_bucket=SalaryBucket.FAIL
+    )
+    verdict = score_and_filter(job, cfg)
+    assert verdict.keep is False
+    assert verdict.reasons[0] == "salary_below_floor"
+
+
+def test_keep_in_office_unknown_salary_demoted(make_job: JobFactory, cfg: Config) -> None:
+    job = make_job(
+        title="Backend Engineer Intern",
+        is_remote=False,
+        description="backend systems platform",
+        salary_bucket=SalaryBucket.UNKNOWN,
+    )
+    verdict = score_and_filter(job, cfg)
+    assert verdict.keep is True
+    assert verdict.score == 5.0  # 10 role-title - 5 in-office-unknown demote
+
+
+def test_drop_when_on_missing_is_drop(make_job: JobFactory, cfg: Config) -> None:
+    drop_cfg = cfg.model_copy(deep=True)
+    drop_cfg.salary.on_missing = "drop"
+    job = make_job(
+        title="Backend Engineer Intern", is_remote=True, salary_bucket=SalaryBucket.UNKNOWN
+    )
+    verdict = score_and_filter(job, drop_cfg)
+    assert verdict.keep is False
+    assert verdict.reasons == ["salary_missing"]
