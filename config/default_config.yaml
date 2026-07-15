@@ -1,0 +1,146 @@
+# Default (seed) configuration. On first `initdb`, this is loaded into the single-row
+# `config` table (as JSON). Thereafter the DASHBOARD is the source of truth — edits there
+# take effect on the NEXT run. This file is only the initial seed + a schema reference.
+# Keep it in sync with the Pydantic models in src/job_aggregator/config/schema.py.
+
+keywords:
+  # roles: matched against the job title (primary signal). Tune to your target internships.
+  roles:
+    - backend engineer
+    - systems software
+    - distributed systems
+    - infrastructure engineer
+    - platform engineer
+    - site reliability
+    - database engineer
+    - ml engineer
+    - machine learning engineer
+    - ai engineer
+    - llm engineer
+    - reinforcement learning
+    - mlops
+  # bonus: +score if present in title/description; never required.
+  bonus:
+    - Go
+    - Golang
+    - Rust
+    - C++
+    - PyTorch
+    - RAG
+    - LLM
+    - GRPO
+    - LoRA
+    - inference
+    - storage engine
+    - consistent hashing
+    - kubernetes
+    - kafka
+  # level_required: at least one must appear (title/description) when require_level is true.
+  level_required:
+    - intern
+    - internship
+    - trainee
+    - new grad
+    - graduate engineer
+    - junior
+  # exclude: hard drop if any appears in the title.
+  exclude:
+    - senior
+    - staff
+    - principal
+    - lead
+    - manager
+    - director
+    - "5+ years"
+    - "clearance required"
+  require_level: true
+
+locations:
+  - "Bengaluru, India"
+  - Bangalore
+  - India
+  - Remote
+  - "Remote - India"
+  - Worldwide
+remote_preferred: true
+
+salary:
+  currency: INR
+  period: month
+  min_remote: 30000        # INR/month floor for a REMOTE role to pass
+  min_in_office: 80000     # INR/month floor for an IN-OFFICE role to pass
+  on_missing: keep_and_flag   # keep_and_flag | drop  (most Indian internships have no salary)
+  demote_in_office_if_unknown: true
+  # Approximate FX rates for normalizing foreign pay to INR/month. Update as needed.
+  fx_rates:
+    USD: 83.0
+    EUR: 90.0
+    GBP: 105.0
+
+schedule:
+  run_hour_local: 3        # daily run at 03:00 local time
+  hours_old: 48            # incremental fetch window (>= 24h + slack for slow feeds)
+  grace_days: 3            # a vanished posting goes stale -> deleted after this many days
+  catch_up_on_startup: true   # if the laptop was asleep at run_hour, run on next startup
+
+sources:
+  jobspy:
+    enabled: true
+    sites: [naukri, linkedin, indeed, google]
+    search_terms: ["backend intern", "systems intern", "ml intern", "golang intern"]
+    location: "Bengaluru, India"
+    country_indeed: india
+    is_remote: true
+    results_wanted: 40
+    hours_old: 48
+    proxies: []            # add ONLY for LinkedIn at volume (guest endpoint 429s ~10 pages/IP)
+  unstop:
+    enabled: true
+    opportunities: [internships, jobs]
+    search_terms: [backend, "machine learning"]
+    max_age_days: 30      # endpoint surfaces stale (2022) posts; recency filter is mandatory
+  remoteok:
+    enabled: true         # element[0] of the API is a legal notice — skip it; attribution required
+  himalayas:
+    enabled: true
+    country: IN           # ~24h refresh: coverage, not freshness
+  jobicy:
+    enabled: true
+    job_type: internship
+  adzuna:
+    enabled: true
+    country: in           # keys via env ADZUNA_APP_ID / ADZUNA_APP_KEY
+  jooble:
+    enabled: true         # key via env JOOBLE_API_KEY
+  remotive:
+    enabled: false        # 24h-delayed + 4 calls/day cap; enable only if you need it
+  ats:
+    greenhouse:
+      enabled: true
+      tokens: []          # e.g. [razorpay, postman] — see docs/ats_token_lists.md
+    lever:
+      enabled: true
+      slugs: []
+    ashby:
+      enabled: true
+      orgs: []            # case-sensitive
+    smartrecruiters:
+      enabled: true
+      company_ids: []     # supports ?country=in
+
+# Explicitly unsupported dead ends (documented in research.md): twitter, wellfound,
+# hiring_cafe (API Cloudflare-locked; browse manually), jsearch (200 req/month free tier).
+
+notify:
+  on: new_only
+  telegram:
+    enabled: false        # bot_token/chat_id via env
+  email:
+    enabled: false
+    smtp_host: localhost
+    smtp_port: 25
+    to: ""
+  rss:
+    enabled: true
+    path: "data/feed.xml"
+    max_items: 100

@@ -1,0 +1,29 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Virtual envs (conda env `job-aggregator` lives outside the repo) ──
+.venv/
+venv/
+
+# ── Secrets ──
+.env
+
+# ── Runtime data (DB, generated feed, logs) — never commit ──
+data/*
+!data/.gitkeep
+
+# ── Editor / OS ──
+.vscode/
+.idea/
+*.swp
+.DS_Store

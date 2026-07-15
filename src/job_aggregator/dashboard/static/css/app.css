@@ -1,0 +1,88 @@
+/* Layout + components (Phase 8 fleshes this out). Uses tokens from theme.css only —
+   never hard-code palette values here; that keeps light/dark honest. */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.mono { font-family: var(--font-mono); }
+.muted { color: var(--text-secondary); }
+
+/* header */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--surface-1);
+  border-bottom: var(--border-w) solid var(--border);
+}
+.app-header .brand { font-weight: var(--fw-emph); font-size: 15px; }
+.app-header nav { display: flex; gap: var(--sp-4); }
+.app-header .spacer { flex: 1; }
+
+.container { max-width: 1100px; margin: 0 auto; padding: var(--sp-5); }
+
+/* cards */
+.card {
+  background: var(--surface-1);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--sp-4);
+}
+
+/* buttons */
+.btn {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: var(--fw-emph);
+  font-size: 12px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-button);
+  cursor: pointer;
+}
+.btn.secondary {
+  background: transparent;
+  color: var(--text);
+  border: var(--border-w) solid var(--border);
+}
+
+/* jobs table */
+table.jobs { width: 100%; border-collapse: collapse; }
+table.jobs th, table.jobs td {
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--border-w) solid var(--border);
+}
+table.jobs tbody tr:nth-child(even) { background: var(--surface-2); }
+
+/* badges */
+.badge { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-button); }
+.badge.remote { background: var(--accent); color: var(--accent-contrast); }
+.salary-pass { color: var(--ok); font-family: var(--font-mono); }
+.salary-unknown { color: var(--warn); font-family: var(--font-mono); }
+
+/* forms (config editor) */
+.field { margin-bottom: var(--sp-4); }
+.field label { display: block; font-weight: var(--fw-emph); margin-bottom: var(--sp-1); }
+.field input, .field textarea, .field select {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg);
+  color: var(--text);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-control);
+  font-family: inherit;
+}
