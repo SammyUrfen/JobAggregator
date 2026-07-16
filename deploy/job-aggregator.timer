@@ -9,7 +9,7 @@
 
 [Unit]
 Description=Run JobAggregator once daily (~03:00 local)
-Documentation=file:///home/SammyUrfen/Codes/job%20aggregator/deploy/job-aggregator.service
+Documentation=https://github.com/SammyUrfen
 
 [Timer]
 # 03:00 every day, local timezone. Adjust to taste; the project targets ~once/24h.

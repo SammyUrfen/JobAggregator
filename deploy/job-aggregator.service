@@ -21,7 +21,7 @@
 
 [Unit]
 Description=JobAggregator daily fetch/dedup/stale-delete run
-Documentation=file:///home/SammyUrfen/Codes/job%20aggregator/PLAN.md
+Documentation=man:job-aggregator https://github.com/SammyUrfen
 # Only meaningful once the network is up (sources are fetched over HTTP).
 Wants=network-online.target
 After=network-online.target
