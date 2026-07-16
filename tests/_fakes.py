@@ -98,10 +98,15 @@ class RaisingSource(Source):
 
 
 class RecordingNotifier:
-    """Duck-typed notifier: records the uids delivered on each notify_new call."""
+    """Duck-typed notifier: records the uids delivered on each notify_new call and the run_id of
+    each end-of-run summary, so tests can assert both hooks fire."""
 
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
+        self.runs: list[int] = []
 
     def notify_new(self, jobs: list[Job], cfg: Config) -> None:
         self.calls.append([job.job_uid for job in jobs])
+
+    def notify_run(self, summary: object, cfg: Config) -> None:
+        self.runs.append(getattr(summary, "run_id", -1))

@@ -20,7 +20,13 @@ from job_aggregator.config.schema import Config
 from job_aggregator.notify.base import FeedScope, build_notifiers
 from job_aggregator.notify.email import EmailNotifier, build_email
 from job_aggregator.notify.rss import RssNotifier, render_feed
-from job_aggregator.notify.telegram import TELEGRAM_MESSAGE_LIMIT, TelegramNotifier, build_digest
+from job_aggregator.notify.telegram import (
+    TELEGRAM_MESSAGE_LIMIT,
+    TelegramNotifier,
+    build_digest,
+    build_run_summary,
+)
+from job_aggregator.pipeline.runner import RunSummary
 from job_aggregator.storage import jobs_repo, runs_repo
 
 ATOM_NS = "http://www.w3.org/2005/Atom"
@@ -104,6 +110,96 @@ def test_telegram_swallows_http_error(monkeypatch: Any) -> None:
     with respx.mock:
         respx.route(method="POST", host="api.telegram.org").mock(return_value=httpx.Response(500))
         TelegramNotifier().notify_new([mkjob("a")], Config())  # must NOT raise
+
+
+# ── Telegram run-summary (Track A: end-of-run digest + dashboard link) ────────────────────
+
+
+def _summary(**kw: Any) -> RunSummary:
+    base: dict[str, Any] = {
+        "run_id": 7,
+        "status": "partial",
+        "n_sources_ok": 5,
+        "n_sources_err": 2,
+        "n_new": 3,
+        "n_updated": 4,
+        "n_expired": 1,
+        "trigger": "manual",
+        "n_filtered_out": 40,
+        "source_errors": {"naukri": "406"},
+    }
+    base.update(kw)
+    return RunSummary(**base)
+
+
+def test_build_run_summary_has_counts_status_and_link() -> None:
+    text = build_run_summary(_summary(), "http://localhost:8770/")
+    assert "Run #7" in text and "partial" in text
+    assert "new 3" in text and "updated 4" in text and "expired 1" in text and "filtered 40" in text
+    assert "sources ok 5 / err 2" in text
+    assert "naukri" in text  # failed source surfaced
+    assert 'href="http://localhost:8770/"' in text
+
+
+def test_build_run_summary_caps_failed_sources() -> None:
+    errs = {f"src{i}": "boom" for i in range(9)}
+    text = build_run_summary(_summary(source_errors=errs), "http://x/")
+    assert "+3 more" in text  # 9 failed, 6 shown, 3 folded
+
+
+def test_run_summary_escapes_dashboard_url() -> None:
+    # A stray quote in the URL must not break out of the href attribute.
+    text = build_run_summary(_summary(), 'http://x/"onmouseover=alert(1)')
+    assert '"onmouseover=alert(1)' not in text
+    assert "&quot;onmouseover" in text
+
+
+def test_notify_run_posts_summary_with_public_url_override(monkeypatch: Any) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "C")
+    monkeypatch.setenv("JOBAGG_PUBLIC_URL", "http://box.local:8770")  # env wins over cfg
+    with respx.mock:
+        route = respx.route(method="POST", host="api.telegram.org").mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
+        TelegramNotifier().notify_run(_summary(), Config())
+    body = json.loads(route.calls.last.request.content)
+    assert body["chat_id"] == "C"
+    assert "http://box.local:8770" in body["text"]
+    assert "localhost:8000" not in body["text"]  # cfg default did not leak
+
+
+def test_notify_run_falls_back_to_cfg_dashboard_url(monkeypatch: Any) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "C")
+    monkeypatch.delenv("JOBAGG_PUBLIC_URL", raising=False)
+    cfg = Config()
+    cfg.notify.dashboard_url = "http://configured:9999/"
+    with respx.mock:
+        route = respx.route(method="POST", host="api.telegram.org").mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
+        TelegramNotifier().notify_run(_summary(), cfg)
+    assert "http://configured:9999/" in json.loads(route.calls.last.request.content)["text"]
+
+
+def test_notify_run_dry_run_when_token_missing(monkeypatch: Any) -> None:
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    with respx.mock:
+        route = respx.route(method="POST", host="api.telegram.org").mock(
+            return_value=httpx.Response(200)
+        )
+        TelegramNotifier().notify_run(_summary(), Config())
+        assert route.call_count == 0
+
+
+def test_notify_run_swallows_http_error(monkeypatch: Any) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "C")
+    with respx.mock:
+        respx.route(method="POST", host="api.telegram.org").mock(return_value=httpx.Response(500))
+        TelegramNotifier().notify_run(_summary(), Config())  # must NOT raise
 
 
 # ── Email ───────────────────────────────────────────────────────────────────────────────

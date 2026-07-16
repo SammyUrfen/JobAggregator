@@ -203,6 +203,17 @@ def test_new_jobs_notified_new_only(
     assert recorder.calls == [["a"], ["c"]]  # only NEW jobs, once each
 
 
+def test_run_summary_hook_fires_once_per_run_even_with_no_new_jobs(
+    conn: sqlite3.Connection, clock: FixedClock, sample_config: Config
+) -> None:
+    # The end-of-run summary must fire regardless of new jobs — including a no-op run with no
+    # sources (n_new=0), unlike the NEW_ONLY digest which stays silent.
+    recorder = RecordingNotifier()
+    summary = run_cycle(conn, sample_config, clock, "manual", sources=[], notifiers=[recorder])
+    assert recorder.calls == [[]]  # per-job hook ran once with an EMPTY payload (real ones no-op)
+    assert recorder.runs == [summary.run_id]  # and the run summary still fired, once
+
+
 def test_source_that_raises_is_caught(
     conn: sqlite3.Connection, clock: FixedClock, sample_config: Config
 ) -> None:

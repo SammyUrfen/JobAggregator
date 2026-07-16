@@ -1,0 +1,56 @@
+# docker-compose.yml — reboot-durable, single-process deployment of JobAggregator.
+#
+# Why this exists: `restart: unless-stopped` + Docker's own start-on-boot behavior make the
+# service survive a host reboot. On restart, `serve` auto-initializes the DB and the in-process
+# scheduler's *startup catch-up* decides whether a fetch is due — it only fires when there has
+# been no SUCCESSFUL run in ~24h, so a reboot mid-day will NOT double-fetch, while a reboot after
+# a long gap catches up once. (Catch-up lives in scheduler/scheduler.py; nothing to configure.)
+#
+# Port: publishes on a NON-8000 host port by default (${JOBAGG_PORT:-8770}) so it never collides
+# with a dev server on :8000. The container always listens on 8000 internally.
+#
+#   cp .env.example .env              # required: env_file below reads it (secrets, keys)
+#   docker compose up -d --build      # start detached, building the image
+#   docker compose logs -f            # tail logs
+#   docker compose ps                 # status + health
+#   docker compose down               # stop + remove container (the named volume PERSISTS)
+#
+# Set JOBAGG_PORT in .env (or your shell) to change the host port; JOBAGG_PUBLIC_URL below then
+# tracks it automatically, so the Telegram run-summary links back to the right host:port.
+#
+# ⚠️  SINGLE PROCESS ONLY — never scale this service to >1 replica and never add uvicorn
+#     --workers. One SQLite DB + one in-process APScheduler; replicas would each schedule the
+#     daily job, double-/triple-fetch every source, and contend on the same DB file.
+
+services:
+  job-aggregator:
+    build: .
+    image: job-aggregator
+    container_name: job-aggregator
+    restart: unless-stopped
+    ports:
+      - "${JOBAGG_PORT:-8770}:8000"
+    env_file:
+      - .env
+    environment:
+      # Base URL used in the Telegram end-of-run summary link. Defaults to this host+published
+      # port; override in .env if you reach the dashboard by a hostname/IP other than localhost.
+      JOBAGG_PUBLIC_URL: "${JOBAGG_PUBLIC_URL:-http://localhost:${JOBAGG_PORT:-8770}}"
+    volumes:
+      # Named volume: the DB, generated feed, and logs (all under /data) survive `down`/rebuild.
+      - jobagg-data:/data
+    healthcheck:
+      # Liveness = the dashboard answers. urllib is stdlib in the python:3.11-slim base image;
+      # `serve` binds 0.0.0.0:8000 inside the container regardless of the published host port.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/', timeout=5).status==200 else 1)"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  jobagg-data:

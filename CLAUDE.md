@@ -26,12 +26,27 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
 - **config/default_config.yaml** — seed config; mirrors `config/schema.py`.
 - **blood_orange_theme_detail.html** — the theme reference; tokens live in
   `dashboard/static/css/theme.css`.
+- **docs/auto_apply_design.md** — research-grounded design for the post-v1 **auto-apply
+  extension** (durable Docker + card UI + truthful résumé tailoring + fill-then-review apply
+  agent). Read it before touching Track A–D work.
 
 ## Current status
-**COMPLETE — Phases 0–9 implemented, audited, and verified.** Full gate green: `ruff check .`,
-`ruff format --check .`, `mypy src`, `pytest` (242 passed / 0 skipped; coverage **89% overall**,
+**v1 COMPLETE — Phases 0–9 implemented, audited, and verified.** Full gate green: `ruff check .`,
+`ruff format --check .`, `mypy src`, `pytest` (**250 passed** / 0 skipped; coverage **89% overall**,
 **94% correctness-core**, hard gate 85%). Verified live: a real cycle writes+dedups jobs and emits
 a valid Atom `feed.xml`; the dashboard serves all routes and auto-initializes on first run.
+
+**Auto-apply extension (post-v1) — in progress.** Design + verified research in
+`docs/auto_apply_design.md`. Locked decisions: fill→**you review→you submit** (never blind
+auto-submit); **both** platform families (ATS = reliable core, LinkedIn/Naukri = best-effort,
+headful, no auto-submit); **two agent backends** behind one adapter (OpenAI-compatible endpoint +
+coding-agent/Claude Code). Build order A→B→C→D.
+- **Track A (durable service + notify + port): DONE.** `docker-compose.yml` (restart-on-boot,
+  health-checked, named volume, non-8000 port via `JOBAGG_PORT`, default 8770); Telegram
+  end-of-run summary (`TelegramNotifier.notify_run` → `build_run_summary`, runner step-8b) with a
+  dashboard link from `JOBAGG_PUBLIC_URL` / `notify.dashboard_url`; startup catch-up (≥24h gate)
+  already handled reboots.
+- **Tracks B–D:** card UI + detail modal → profile + LaTeX résumé tailoring → opt-in apply agent.
 
 A multi-agent adversarial audit (ultracode) found **13 real defects**, all now fixed or documented:
 Tier-B salaries now normalized to INR/month in the runner (were bucketed raw → good jobs dropped);
@@ -76,8 +91,8 @@ Phase-by-phase history (each shipped green, `mypy`/`ruff`/`pytest` clean):
   `/api/runs/current` poll; error hierarchy → JSON envelope. Verified live via curl (Playwright
   MCP not connected this session).
 
-**Remaining: Phase 9** — stubs still `NotImplementedError`/pending. Build per PLAN.md Part II.
-Next: Phase 9 (polish, coverage gate ≥85%, README/docs/TROUBLESHOOTING, optional hardening).
+- **Phase 9** — polish/hardening: multi-agent adversarial audit (13 defects fixed, above),
+  coverage gate ≥85%, README/docs/TROUBLESHOOTING, deploy extras. v1 done.
 
 ## Conventions (the user's — honor them)
 - **ruff** (lint+format) + **mypy** strict + **pytest** must be green before "done".

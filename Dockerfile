@@ -9,6 +9,9 @@
 # Build:  docker build -t job-aggregator .
 # Run:    docker run -p 8000:8000 -v jobagg-data:/data --env-file .env job-aggregator
 #         (the DB auto-initializes on `serve`; visit http://localhost:8000)
+#
+# For a REBOOT-DURABLE deployment (restart-on-boot, non-8000 host port, Telegram run-summary
+# link wired to the published port) prefer `docker compose up -d --build` — see docker-compose.yml.
 
 FROM python:3.11-slim
 

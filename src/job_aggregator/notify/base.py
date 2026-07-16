@@ -18,6 +18,7 @@ from job_aggregator.models.job import Job
 
 if TYPE_CHECKING:
     from job_aggregator.clock import Clock
+    from job_aggregator.pipeline.runner import RunSummary
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,11 @@ class Notifier(ABC):
     def notify_new(self, jobs: list[Job], cfg: Config) -> None:
         """Deliver `jobs`. MUST NOT raise; on failure log and return."""
         ...
+
+    def notify_run(self, summary: RunSummary, cfg: Config) -> None:
+        """Optional end-of-run summary (status + counts + dashboard link). Default: no-op.
+        Only Telegram implements it; RSS/email ignore it. MUST NOT raise."""
+        return
 
 
 def format_remote_or_location(job: Job) -> str:

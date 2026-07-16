@@ -92,7 +92,7 @@ def run_cycle(
         n_new, n_updated, n_filtered = _filter_and_upsert(conn, run_id, results, cfg, clock)
         conn.commit()
         n_expired = expire_stale(conn, run_id, succeeded, cfg, clock)
-        _notify(conn, run_id, cfg, clock, notifiers)  # step 8
+        resolved_notifiers = _notify(conn, run_id, cfg, clock, notifiers)  # step 8: per-job
         status = _run_status(n_ok, n_err)
         runs_repo.finish_run(
             conn,
@@ -106,7 +106,7 @@ def run_cycle(
             clock=clock,
         )
         conn.commit()
-        return RunSummary(
+        summary = RunSummary(
             run_id,
             status,
             n_ok,
@@ -119,6 +119,11 @@ def run_cycle(
             duration_ms=int((time.perf_counter() - started) * 1000),
             source_errors=source_errors,
         )
+        # Step 8b: end-of-run summary (Telegram digest + dashboard link). Fires AFTER finish_run
+        # so `status` is final, and only after the commit above so a notifier can't see a run the
+        # DB hasn't durably finalized. Failures never fail the run.
+        _notify_run_summary(resolved_notifiers, summary, cfg)
+        return summary
     except Exception as exc:
         logger.exception("cycle #%d failed fatally", run_id)
         try:
@@ -254,12 +259,13 @@ def _notify(
     cfg: Config,
     clock: Clock,
     notifiers: Sequence[SupportsNotifyNew] | None,
-) -> None:
+) -> Sequence[SupportsNotifyNew]:
     """Step 8 (final): hand each notifier its feed-scoped payload, straight from the DB.
 
     NEW_ONLY channels get this run's new jobs (`jobs_new_in_run` — never a stuck-'new' from a
     failed source); RECENT_ACTIVE (RSS) gets the recent-active snapshot. A notifier failure
-    NEVER fails the run. Notify does not mutate run counts.
+    NEVER fails the run. Notify does not mutate run counts. Returns the resolved notifiers so the
+    caller can reuse them for the end-of-run summary without rebuilding.
     """
     from job_aggregator.notify.base import FeedScope, build_notifiers
 
@@ -274,6 +280,25 @@ def _notify(
         except Exception:
             name = getattr(notifier, "name", type(notifier).__name__)
             logger.exception("notifier %s raised (ignored)", name)
+    return resolved
+
+
+def _notify_run_summary(
+    notifiers: Sequence[SupportsNotifyNew], summary: RunSummary, cfg: Config
+) -> None:
+    """Step 8b: hand each notifier that implements `notify_run` an end-of-run summary (status +
+    counts + dashboard link). Only Telegram uses it today; other channels inherit a no-op. Fires
+    once per run regardless of whether any new jobs appeared, so a quiet run still pings you. A
+    failure NEVER fails the run — the cycle's data is already committed."""
+    for notifier in notifiers:
+        notify_run = getattr(notifier, "notify_run", None)
+        if notify_run is None:  # duck-typed notifier without the optional hook
+            continue
+        try:
+            notify_run(summary, cfg)
+        except Exception:
+            name = getattr(notifier, "name", type(notifier).__name__)
+            logger.exception("notifier %s run-summary raised (ignored)", name)
 
 
 def _run_status(n_ok: int, n_err: int) -> str:

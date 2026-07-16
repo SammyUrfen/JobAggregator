@@ -135,6 +135,9 @@ class NotifyConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
     rss: RssConfig = Field(default_factory=RssConfig)
+    # Base URL of the dashboard, used in the Telegram end-of-run summary link. Override at
+    # runtime with env JOBAGG_PUBLIC_URL (handy in Docker where the host port differs).
+    dashboard_url: str = "http://localhost:8000"
 
 
 class Config(BaseModel):
