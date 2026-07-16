@@ -1,8 +1,57 @@
 {% extends "base.html" %}
 {% block title %}Jobs · JobAggregator{% endblock %}
 {% block content %}
-{# TODO(Phase 8): filter bar (q/source/remote/bucket/status/applied/bookmarked/sort) as a
-   GET form, then a <table class="jobs"> of {% include 'partials/job_row.html' %} rows,
-   plus pagination. Data from jobs_repo.get_jobs(...). #}
-<div class="card"><p class="muted">Phase 8: jobs table + filters go here.</p></div>
+<form class="filters card" method="get" action="/">
+  <input type="search" name="q" placeholder="Search title / company" value="{{ query.q or '' }}">
+  <select name="source" aria-label="Source">
+    <option value="">All sources</option>
+    {% for s in sources %}
+      <option value="{{ s }}" {% if query.source == s %}selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <select name="remote" aria-label="Remote">
+    <option value="">Anywhere</option>
+    <option value="yes" {% if query.remote == 'yes' %}selected{% endif %}>Remote</option>
+    <option value="no" {% if query.remote == 'no' %}selected{% endif %}>On-site</option>
+  </select>
+  <select name="bucket" aria-label="Pay">
+    <option value="">Any pay</option>
+    {% for b in buckets %}
+      <option value="{{ b }}" {% if query.bucket == b %}selected{% endif %}>{{ b }}</option>
+    {% endfor %}
+  </select>
+  <select name="sort" aria-label="Sort">
+    <option value="score" {% if query.sort == 'score' %}selected{% endif %}>Sort: score</option>
+    <option value="date" {% if query.sort == 'date' %}selected{% endif %}>Sort: date</option>
+    <option value="salary" {% if query.sort == 'salary' %}selected{% endif %}>Sort: salary</option>
+  </select>
+  <label class="chk"><input type="checkbox" name="applied" value="1" {% if query.applied %}checked{% endif %}> Applied</label>
+  <label class="chk"><input type="checkbox" name="bookmarked" value="1" {% if query.bookmarked %}checked{% endif %}> Bookmarked</label>
+  <label class="chk"><input type="checkbox" name="show_hidden" value="1" {% if query.show_hidden %}checked{% endif %}> Show hidden</label>
+  <button class="btn" type="submit">Filter</button>
+</form>
+
+<div class="card table-wrap">
+  {% if jobs %}
+  <table class="jobs" id="jobs-table">
+    <thead>
+      <tr>
+        <th>Score</th><th>Title</th><th>Company</th><th>Location</th>
+        <th>Pay</th><th>Posted</th><th>Source</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in jobs %}{% include 'partials/job_row.html' %}{% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted empty" data-testid="empty">No jobs match these filters.</p>
+  {% endif %}
+</div>
+
+<nav class="pagination">
+  {% if page > 1 %}<a class="btn secondary" href="/?{{ prev_qs }}">← Prev</a>{% endif %}
+  <span class="muted mono">Page {{ page }} · {{ total }} total</span>
+  {% if page * page_size < total %}<a class="btn secondary" href="/?{{ next_qs }}">Next →</a>{% endif %}
+</nav>
 {% endblock %}

@@ -1,8 +1,98 @@
 {% extends "base.html" %}
 {% block title %}Config · JobAggregator{% endblock %}
 {% block content %}
-{# TODO(Phase 8): form bound to the Pydantic Config (keywords, locations, salary thresholds,
-   schedule hour, per-source toggles + ATS token lists, notify). PUT /api/config on save;
-   show validation errors inline; toast "applies on next run". #}
-<div class="card"><p class="muted">Phase 8: config editor form goes here.</p></div>
+<form id="config-form" class="card config">
+  <p class="muted">Edits take effect on the <b>next run</b>.</p>
+
+  <fieldset>
+    <legend>Schedule</legend>
+    <div class="field">
+      <label for="run_hour_local">run_hour_local (0–23)</label>
+      <input type="number" id="run_hour_local" name="run_hour_local" min="0" max="23"
+             value="{{ config.schedule.run_hour_local }}">
+      <span class="field-error" data-field-error="schedule.run_hour_local"></span>
+    </div>
+    <div class="field">
+      <label for="hours_old">hours_old</label>
+      <input type="number" id="hours_old" name="hours_old" value="{{ config.schedule.hours_old }}">
+      <span class="field-error" data-field-error="schedule.hours_old"></span>
+    </div>
+    <div class="field">
+      <label for="grace_days">grace_days</label>
+      <input type="number" id="grace_days" name="grace_days" value="{{ config.schedule.grace_days }}">
+      <span class="field-error" data-field-error="schedule.grace_days"></span>
+    </div>
+    <label class="chk"><input type="checkbox" name="catch_up_on_startup" value="true"
+      {% if config.schedule.catch_up_on_startup %}checked{% endif %}> catch_up_on_startup</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Salary</legend>
+    <div class="field">
+      <label for="salary_min_remote">min_remote (INR/month)</label>
+      <input type="number" id="salary_min_remote" name="salary_min_remote"
+             value="{{ config.salary.min_remote }}">
+      <span class="field-error" data-field-error="salary.min_remote"></span>
+    </div>
+    <div class="field">
+      <label for="salary_min_in_office">min_in_office (INR/month)</label>
+      <input type="number" id="salary_min_in_office" name="salary_min_in_office"
+             value="{{ config.salary.min_in_office }}">
+      <span class="field-error" data-field-error="salary.min_in_office"></span>
+    </div>
+    <div class="field">
+      <label for="salary_on_missing">on_missing</label>
+      <select id="salary_on_missing" name="salary_on_missing">
+        <option value="keep_and_flag" {% if config.salary.on_missing == 'keep_and_flag' %}selected{% endif %}>keep_and_flag</option>
+        <option value="drop" {% if config.salary.on_missing == 'drop' %}selected{% endif %}>drop</option>
+      </select>
+      <span class="field-error" data-field-error="salary.on_missing"></span>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Keywords &amp; locations</legend>
+    <label class="chk"><input type="checkbox" name="require_level" value="true"
+      {% if config.keywords.require_level %}checked{% endif %}> require_level</label>
+    <div class="field">
+      <label for="keywords_roles">roles (one per line)</label>
+      <textarea id="keywords_roles" name="keywords_roles" rows="4">{{ config.keywords.roles | join('\n') }}</textarea>
+    </div>
+    <div class="field">
+      <label for="keywords_exclude">exclude</label>
+      <textarea id="keywords_exclude" name="keywords_exclude" rows="2">{{ config.keywords.exclude | join('\n') }}</textarea>
+    </div>
+    <div class="field">
+      <label for="locations">locations</label>
+      <textarea id="locations" name="locations" rows="3">{{ config.locations | join('\n') }}</textarea>
+    </div>
+    <label class="chk"><input type="checkbox" name="remote_preferred" value="true"
+      {% if config.remote_preferred %}checked{% endif %}> remote_preferred</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Sources</legend>
+    {% for name in source_toggles %}
+    <label class="chk"><input type="checkbox" name="src_{{ name }}" value="true"
+      {% if config.sources[name].enabled %}checked{% endif %}> {{ name }}</label>
+    {% endfor %}
+  </fieldset>
+
+  <fieldset>
+    <legend>Notify</legend>
+    <label class="chk"><input type="checkbox" name="notify_rss_enabled" value="true"
+      {% if config.notify.rss.enabled %}checked{% endif %}> rss</label>
+    <label class="chk"><input type="checkbox" name="notify_telegram_enabled" value="true"
+      {% if config.notify.telegram.enabled %}checked{% endif %}> telegram</label>
+    <label class="chk"><input type="checkbox" name="notify_email_enabled" value="true"
+      {% if config.notify.email.enabled %}checked{% endif %}> email</label>
+    <div class="field">
+      <label for="notify_email_to">email to</label>
+      <input type="text" id="notify_email_to" name="notify_email_to" value="{{ config.notify.email.to }}">
+    </div>
+  </fieldset>
+
+  <button class="btn" type="submit">Save config</button>
+  <span class="banner" id="config-banner" role="status"></span>
+</form>
 {% endblock %}

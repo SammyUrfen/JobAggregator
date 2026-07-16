@@ -1,2 +1,11 @@
-{# TODO(Phase 8): compact current-run status widget, refreshed by GET /api/runs/current. #}
-<div class="muted">Phase 8: run status</div>
+<div class="run-status" id="run-status">
+  {% if current %}
+    <span class="pill pill-{{ current.status }}" id="rs-pill">{{ current.status }}</span>
+    <span class="mono">new <b id="rs-new">{{ current.n_new }}</b></span>
+    <span class="mono">updated <b id="rs-updated">{{ current.n_updated }}</b></span>
+    <span class="mono">expired <b id="rs-expired">{{ current.n_expired }}</b></span>
+    {% if current.error %}<span class="muted" id="rs-error">{{ current.error }}</span>{% endif %}
+  {% else %}
+    <span class="pill" id="rs-pill">idle</span>
+  {% endif %}
+</div>

@@ -61,6 +61,10 @@ ignore = [
     "PLR2004",  # magic-value in tests is fine
 ]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection markers are called in argument defaults by design.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Form", "fastapi.Body"]
+
 [tool.ruff.lint.per-file-ignores]
 # Deferred imports are deliberate here: cli.py keeps heavy deps lazy so `--help` runs on the
 # stdlib alone (see cli.py docstring), and test fixtures import Phase-scoped modules inside the
@@ -75,6 +79,8 @@ ignore = [
 "src/job_aggregator/scheduler/scheduler.py" = ["PLC0415"]
 # notify.build_notifiers imports channel modules lazily to avoid a base<->channel import cycle.
 "src/job_aggregator/notify/base.py" = ["PLC0415"]
+# dashboard create_app defers scheduler/clock/connect imports (keeps build light, no cycle).
+"src/job_aggregator/dashboard/app.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"

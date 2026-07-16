@@ -1,7 +1,53 @@
 {% extends "base.html" %}
 {% block title %}Runs · JobAggregator{% endblock %}
 {% block content %}
-{# TODO(Phase 8): run history table (time, trigger, status, counts, duration) + per-source
-   breakdown + errors. Live status via {% include 'partials/run_status.html' %} polling. #}
-<div class="card"><p class="muted">Phase 8: run history goes here.</p></div>
+<div class="card">
+  <h2>Current</h2>
+  {% include 'partials/run_status.html' %}
+</div>
+
+<div class="card table-wrap">
+  <h2>History</h2>
+  {% if runs %}
+  <table class="jobs">
+    <thead>
+      <tr><th>Started</th><th>Trigger</th><th>Status</th><th>New</th><th>Updated</th><th>Expired</th></tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td><a href="/runs?run_id={{ r.run_id }}">{{ r.started_at }}</a></td>
+        <td>{{ r.trigger }}</td>
+        <td><span class="pill pill-{{ r.status }}">{{ r.status }}</span></td>
+        <td class="mono">{{ r.n_new }}</td>
+        <td class="mono">{{ r.n_updated }}</td>
+        <td class="mono">{{ r.n_expired }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" data-testid="empty">No runs yet.</p>
+  {% endif %}
+</div>
+
+{% if source_runs %}
+<div class="card table-wrap">
+  <h2>Sources · latest run</h2>
+  <table class="jobs">
+    <thead><tr><th>Source</th><th>Status</th><th>Fetched</th><th>Duration</th><th>Error</th></tr></thead>
+    <tbody>
+      {% for s in source_runs %}
+      <tr>
+        <td>{{ s.source }}</td>
+        <td>{% if s.succeeded %}<span class="pill pill-success">ok</span>{% else %}<span class="pill pill-failed">failed</span>{% endif %}</td>
+        <td class="mono">{{ s.n_fetched if s.n_fetched is not none else '—' }}</td>
+        <td class="mono muted">{{ s.duration_ms if s.duration_ms is not none else '—' }} ms</td>
+        <td class="muted">{{ s.error or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% endblock %}

@@ -7,6 +7,13 @@
   <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='css/theme.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  <script>
+    /* anti-FOUC: apply the saved theme before first paint (beats the OS preference). */
+    (function () {
+      var t = localStorage.getItem("jobagg-theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
 </head>
 <body>
   <header class="app-header">
@@ -17,9 +24,16 @@
       <a href="/config">Config</a>
     </nav>
     <span class="spacer"></span>
-    {# TODO(Phase 8): last-run summary + next-run time injected here #}
-    <button class="btn" onclick="runNow()">Run now</button>
-    <button class="btn secondary" onclick="toggleTheme()">◐</button>
+    <span class="run-summary muted mono" id="run-summary">
+      {%- if last_run -%}
+        Last: {{ last_run.status }} · new {{ last_run.n_new }}
+      {%- else -%}
+        No runs yet
+      {%- endif -%}
+      {%- if next_run_at %} · Next {{ next_run_at }}{% endif -%}
+    </span>
+    <button class="btn" id="run-now-btn" type="button" onclick="runNow()">Run now</button>
+    <button class="btn secondary" type="button" onclick="toggleTheme()" aria-label="Toggle theme">◐</button>
   </header>
 
   <main class="container">
