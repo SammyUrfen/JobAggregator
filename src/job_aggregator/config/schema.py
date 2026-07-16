@@ -58,6 +58,9 @@ class UnstopConfig(BaseModel):
     opportunities: list[str] = Field(default_factory=lambda: ["internships", "jobs"])
     search_terms: list[str] = Field(default_factory=list)
     max_age_days: int = 30
+    # Pages to walk per opportunity before stopping (safety cap; pagination also stops on an
+    # empty/short page). ge=1 so a misconfig can't disable the source. See sources/_http.py.
+    max_pages: int = Field(default=5, ge=1)
 
 
 class SimpleSourceConfig(BaseModel):
@@ -76,6 +79,13 @@ class JobicyConfig(SimpleSourceConfig):
 
 class AdzunaConfig(SimpleSourceConfig):
     country: str = "in"
+    # Pages of 50 to walk before stopping (also stops on an empty/short page). 10 -> up to ~500.
+    max_pages: int = Field(default=10, ge=1)
+
+
+class JoobleConfig(SimpleSourceConfig):
+    # Pages to walk before stopping (also stops on an empty page from the API).
+    max_pages: int = Field(default=10, ge=1)
 
 
 class GreenhouseConfig(SimpleSourceConfig):
@@ -108,7 +118,7 @@ class SourcesConfig(BaseModel):
     himalayas: HimalayasConfig = Field(default_factory=HimalayasConfig)
     jobicy: JobicyConfig = Field(default_factory=JobicyConfig)
     adzuna: AdzunaConfig = Field(default_factory=AdzunaConfig)
-    jooble: SimpleSourceConfig = Field(default_factory=SimpleSourceConfig)
+    jooble: JoobleConfig = Field(default_factory=JoobleConfig)
     remotive: SimpleSourceConfig = Field(default_factory=lambda: SimpleSourceConfig(enabled=False))
     ats: AtsConfig = Field(default_factory=AtsConfig)
 
@@ -140,6 +150,29 @@ class NotifyConfig(BaseModel):
     dashboard_url: str = "http://localhost:8000"
 
 
+class ResumeConfig(BaseModel):
+    """Résumé-tailoring engine (Track C/D). The API key is NEVER stored here — it comes from the
+    env var named by `api_key_env`. Two backends: an OpenAI-compatible HTTP endpoint, or a local
+    coding agent (Claude Code / Codex) invoked as a subprocess."""
+
+    backend: Literal["openai_compatible", "coding_agent"] = "openai_compatible"
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o-mini"
+    api_key_env: str = "OPENAI_API_KEY"  # which env var holds the key (never the key itself)
+    # coding-agent backend: a command that reads a prompt on stdin, writes the completion to stdout.
+    agent_command: list[str] = Field(default_factory=lambda: ["claude", "-p"])
+    max_projects: int = Field(default=4, ge=1)  # projects to include on the tailored résumé
+    temperature: float = Field(default=0.2, ge=0.0, le=2.0)  # low = truthful, deterministic
+
+
+class ApplyConfig(BaseModel):
+    """The browser apply agent (Track D). Opt-in and OFF by default: it fills forms in a headful
+    browser you can watch, then STOPS for you to review and submit (never auto-submits)."""
+
+    enabled: bool = False
+    auto_submit: bool = False  # intentionally unsupported today; documents the deliberate choice
+
+
 class Config(BaseModel):
     """The root effective configuration."""
 
@@ -150,3 +183,5 @@ class Config(BaseModel):
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     notify: NotifyConfig = Field(default_factory=NotifyConfig)
+    resume: ResumeConfig = Field(default_factory=ResumeConfig)
+    apply: ApplyConfig = Field(default_factory=ApplyConfig)

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from job_aggregator.errors import SourceError
-from job_aggregator.sources._http import get_json, make_client
+from job_aggregator.sources._http import get_json, make_client, paginate_until_empty
 from job_aggregator.sources.base import (
     RawPosting,
     Source,
@@ -38,11 +39,16 @@ class UnstopSource(Source):
     name = "unstop"
 
     def __init__(
-        self, opportunities: list[str], search_terms: list[str], max_age_days: int
+        self,
+        opportunities: list[str],
+        search_terms: list[str],
+        max_age_days: int,
+        max_pages: int = 5,
     ) -> None:
         self.opportunities = opportunities
         self.search_terms = search_terms
         self.max_age_days = max_age_days
+        self.max_pages = max_pages
 
     def fetch(self, cfg: Config, clock: Clock) -> SourceResult:
         start = time.perf_counter()
@@ -51,18 +57,27 @@ class UnstopSource(Source):
         errors: list[str] = []
         ok = 0
         with make_client() as client:
+
+            def fetch_page(page: int, opp: str) -> list[Any]:
+                data = get_json(
+                    client, _URL, params={"opportunity": opp, "per_page": _PER_PAGE, "page": page}
+                )
+                inner = ((data.get("data") or {}).get("data")) if isinstance(data, dict) else None
+                return inner if isinstance(inner, list) else []
+
             for opp in self.opportunities:
                 try:
-                    data = get_json(
-                        client, _URL, params={"opportunity": opp, "per_page": _PER_PAGE, "page": 1}
+                    # partial binds THIS opp (avoids the late-binding loop-closure trap).
+                    items = paginate_until_empty(
+                        partial(fetch_page, opp=opp),
+                        max_pages=self.max_pages,
+                        page_size=_PER_PAGE,
                     )
                 except SourceError as exc:
                     errors.append(f"{opp}: {exc}")
                     continue
                 ok += 1
-                inner = ((data.get("data") or {}).get("data")) if isinstance(data, dict) else None
-                if isinstance(inner, list):
-                    all_items.extend(inner)
+                all_items.extend(items)
         if ok == 0:
             return SourceResult.failed(
                 self.name, f"all opportunities failed: {errors}", duration_ms=elapsed_ms(start)

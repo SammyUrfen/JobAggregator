@@ -59,14 +59,38 @@ a:hover { text-decoration: underline; }
   border: var(--border-w) solid var(--border);
 }
 
-/* jobs table */
-table.jobs { width: 100%; border-collapse: collapse; }
-table.jobs th, table.jobs td {
-  text-align: left;
-  padding: var(--sp-2) var(--sp-3);
-  border-bottom: var(--border-w) solid var(--border);
+/* jobs grid + cards (Track B) */
+.jobs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-4);
 }
-table.jobs tbody tr:nth-child(even) { background: var(--surface-2); }
+.job-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  background: var(--surface-1);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--sp-4);
+  cursor: pointer;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.job-card:hover { border-color: var(--accent); }
+.job-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.jc-head { display: flex; align-items: center; justify-content: space-between; }
+.jc-score { font-size: 12px; color: var(--text-secondary); }
+.jc-flags { display: inline-flex; gap: var(--sp-1); }
+.jc-title { font-size: 14px; font-weight: var(--fw-emph); margin: 0; line-height: 1.35; }
+.jc-company { color: var(--text-secondary); font-size: 13px; }
+.jc-meta { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: auto; }
+.jc-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-2); padding-top: var(--sp-2);
+  border-top: var(--border-w) solid var(--border);
+}
+.jc-posted { font-size: 11px; }
+.jc-actions { display: inline-flex; gap: 4px; }
 
 /* badges */
 .badge { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-button); }
@@ -118,6 +142,12 @@ table.jobs tbody tr:nth-child(even) { background: var(--surface-2); }
 .badge.bucket-pass { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .badge.bucket-fail { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .badge.bucket-unknown { background: var(--surface-2); color: var(--text-secondary); }
+.badge.source { background: var(--surface-2); color: var(--text-secondary); }
+.badge.applied { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.badge.bookmarked { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.badge.status { background: var(--surface-2); color: var(--text-secondary); }
+.badge.status-new { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.badge.status-stale, .badge.status-deleted { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
 
 /* row action buttons */
 .actions { white-space: nowrap; }
@@ -165,3 +195,47 @@ table.jobs tbody tr:nth-child(even) { background: var(--surface-2); }
 
 /* headings */
 h2 { font-size: 14px; margin: 0 0 var(--sp-3); }
+
+/* ── detail modal (Track B) ─────────────────────────────────────────────── */
+body.modal-open { overflow: hidden; } /* freeze the page behind the modal */
+.modal { position: fixed; inset: 0; z-index: 50; display: flex;
+  align-items: center; justify-content: center; padding: var(--sp-4); }
+.modal[hidden] { display: none; }
+.modal-backdrop { position: absolute; inset: 0;
+  background: color-mix(in srgb, #000 55%, transparent); }
+.modal-card {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: min(85vh, 900px);
+  overflow-y: auto;
+  padding: var(--sp-5);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.jd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
+.jd-title { font-size: 18px; margin: 0 0 var(--sp-1); line-height: 1.3; }
+.jd-company { color: var(--text-secondary); }
+.modal-close {
+  flex: none; background: transparent; border: var(--border-w) solid var(--border);
+  color: var(--text); border-radius: var(--radius-button);
+  width: 30px; height: 30px; cursor: pointer; font-size: 14px;
+}
+.modal-close:hover { border-color: var(--accent); color: var(--accent); }
+.jd-badges { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: var(--sp-4) 0; }
+.jd-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-2) var(--sp-4); margin: 0 0 var(--sp-4); font-size: 12px;
+}
+.jd-facts div { display: flex; flex-direction: column; }
+.jd-facts dt { color: var(--text-secondary); }
+.jd-facts dd { margin: 0; }
+.jd-desc {
+  background: var(--surface-2); border-radius: var(--radius-inner);
+  padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4);
+  max-height: 40vh; overflow-y: auto;
+}
+.jd-desc-body { white-space: pre-wrap; word-wrap: break-word; margin: 0; font-size: 13px; }
+.jd-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.jd-primary { display: inline-flex; gap: var(--sp-2); }
+.jd-secondary { display: inline-flex; gap: 4px; margin-left: auto; }
+.apply-btn { background: var(--accent); color: var(--accent-contrast); }
+.jd-note { flex-basis: 100%; font-size: 11px; margin: var(--sp-1) 0 0; }

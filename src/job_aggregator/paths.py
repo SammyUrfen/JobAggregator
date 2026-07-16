@@ -18,11 +18,28 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 SCHEMA_SQL_PATH = PACKAGE_DIR / "storage" / "schema.sql"
 TEMPLATES_DIR = PACKAGE_DIR / "dashboard" / "templates"
 STATIC_DIR = PACKAGE_DIR / "dashboard" / "static"
+RESUME_TEMPLATES_DIR = PACKAGE_DIR / "resume" / "templates"  # packaged LaTeX résumé templates
 
 # ── Repo-level config seed. The repo root is three parents up from this file
 #    (src/job_aggregator/paths.py -> src/job_aggregator -> src -> repo root). ──
 REPO_ROOT = PACKAGE_DIR.parent.parent
 DEFAULT_CONFIG_YAML = REPO_ROOT / "config" / "default_config.yaml"
+# Committed placeholder profile (no PII). The real profile.yaml is git-ignored; copy from this.
+PROFILE_EXAMPLE_YAML = REPO_ROOT / "config" / "profile.example.yaml"
+
+
+def default_resume_template() -> Path:
+    """The base LaTeX résumé template. Override with env JOBAGG_RESUME_TEMPLATE."""
+    env = os.environ.get("JOBAGG_RESUME_TEMPLATE")
+    return Path(env).resolve() if env else RESUME_TEMPLATES_DIR / "base_resume.tex"
+
+
+def default_profile_path() -> Path:
+    """The user's ground-truth profile (projects/skills/education). Override with env
+    JOBAGG_PROFILE; defaults to `profile.yaml` at the repo root (it is personal, not secret —
+    it is the public résumé content — so it lives beside the code, not in the DB)."""
+    env = os.environ.get("JOBAGG_PROFILE")
+    return Path(env).resolve() if env else REPO_ROOT / "profile.yaml"
 
 
 def data_dir() -> Path:

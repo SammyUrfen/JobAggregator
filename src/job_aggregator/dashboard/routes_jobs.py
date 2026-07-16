@@ -1,13 +1,16 @@
-"""Jobs routes (Phase 8): GET / (server-rendered filtered table) + row actions.
+"""Jobs routes: GET / (server-rendered filtered card grid) + detail modal + card actions.
 
 Filters are GET query params (bookmarkable); only the whitelisted ORDER BY fragment and the
-whitelisted action column are ever interpolated — every user value binds via `?`.
+whitelisted action column are ever interpolated — every user value binds via `?`. The detail
+modal body (GET /api/jobs/{uid}/detail) flattens any HTML description to plain text server-side
+(html_to_text) so untrusted source markup never renders. Actions return the updated card partial.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -30,6 +33,34 @@ router = APIRouter()
 
 PAGE_SIZE = 50
 MAX_Q_LEN = 200
+# Cap the detail-modal description. Source descriptions can be arbitrarily long (or hostile);
+# the modal scrolls, but an unbounded blob is pointless — the original posting has the full text.
+MAX_DESC_CHARS = 12000
+# Closing one of these ends a line when flattening HTML to text. `<br>` is handled on open
+# (it is void — no close), so it is deliberately NOT in this set.
+_BLOCK_TAGS = frozenset(
+    {
+        "p",
+        "div",
+        "li",
+        "ul",
+        "ol",
+        "tr",
+        "section",
+        "article",
+        "header",
+        "footer",
+        "blockquote",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+    }
+)
+# Their text content is code/markup, never prose — drop it entirely, don't just neutralize it.
+_SKIP_TAGS = frozenset({"script", "style", "noscript"})
 BUCKET_KEYS = ("pass", "unknown", "fail")
 _STATUS_VALUES = ("new", "active", "stale", "deleted")
 _SORT_OPTIONS = ("score", "date", "salary")
@@ -50,6 +81,49 @@ _ACTIONS = {
     "hide": ("hidden", 1),
     "unhide": ("hidden", 0),
 }
+
+
+class _TextExtractor(HTMLParser):
+    """Flatten HTML to plain text: keep text nodes, drop tags, insert a newline around block tags.
+    `convert_charrefs=True` (default) means entities arrive already decoded in handle_data."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+        self._skip = 0  # depth inside a script/style/noscript subtree
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip += 1
+        elif tag == "br":  # void: no close tag to hang the newline on
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip = max(0, self._skip - 1)
+        elif tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip:
+            self.parts.append(data)
+
+
+def html_to_text(raw: str | None) -> str:
+    """Render a (possibly HTML) source description as safe, readable plain text.
+
+    We flatten to text server-side rather than sanitizing+rendering HTML: descriptions come from
+    untrusted external sources, so stripping to text sidesteps stored XSS entirely (the template
+    then auto-escapes the result). Collapses runs of blank lines and caps length.
+    """
+    if not raw:
+        return ""
+    parser = _TextExtractor()
+    parser.feed(raw)
+    # Drop blank lines entirely so output is deterministic regardless of the source's incidental
+    # whitespace between tags; non-empty lines are joined by a single newline.
+    lines = (line.strip() for line in "".join(parser.parts).splitlines())
+    return "\n".join(line for line in lines if line).strip()[:MAX_DESC_CHARS]
 
 
 @dataclass(frozen=True)
@@ -182,6 +256,21 @@ def index(
     return templates.TemplateResponse(request, "jobs.html", context)
 
 
+@router.get("/api/jobs/{uid}/detail", response_class=HTMLResponse)
+def job_detail(
+    uid: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> HTMLResponse:
+    """The detail-modal body for one job: facts + a flattened description + the original link."""
+    row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
+    if row is None:
+        raise NotFoundError("job not found", details={"uid": uid})
+    context = {"job": row, "description_text": html_to_text(row["description"])}
+    return templates.TemplateResponse(request, "partials/job_detail.html", context)
+
+
 @router.post("/api/jobs/{uid}/action", response_class=HTMLResponse)
 def job_action(
     uid: str,
@@ -196,4 +285,4 @@ def job_action(
     if cur.rowcount == 0:
         raise NotFoundError("job not found", details={"uid": uid})
     row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
-    return templates.TemplateResponse(request, "partials/job_row.html", {"job": row})
+    return templates.TemplateResponse(request, "partials/job_card.html", {"job": row})

@@ -60,11 +60,17 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     """Launch the dashboard (which owns the daily scheduler). Implemented in Phase 8."""
+    import os
+
     import uvicorn
 
     from job_aggregator.logging_setup import configure_logging
 
     configure_logging(args.log_level)
+    # The uvicorn factory calls create_app() with no kwargs, so --db is passed through the
+    # environment (create_app reads JOBAGG_DB). Without this, `serve --db X` would silently serve
+    # the default DB — which also broke the "verify against a throwaway --db" safety workflow.
+    os.environ["JOBAGG_DB"] = str(args.db)
     # Single process ONLY — never `--workers N`: each worker would spin up its own scheduler,
     # firing the daily cycle N times. The dashboard's lifespan owns exactly one JobScheduler.
     uvicorn.run(

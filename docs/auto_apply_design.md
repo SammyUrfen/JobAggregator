@@ -13,7 +13,10 @@
 > health-checked, named volume, non-8000 port `JOBAGG_PORT` default 8770); Telegram end-of-run
 > summary (`notify_run` → `build_run_summary`) with a dashboard link driven by `JOBAGG_PUBLIC_URL`
 > / `notify.dashboard_url`; startup catch-up (≥24h-since-success gate) already covered reboots.
-> 250 tests green, 89% cov.
+>
+> **Track B (card UI + detail modal): DONE.** `.jobs-grid` of clickable `.job-card`s → `#job-modal`
+> from `GET /api/jobs/{uid}/detail`; original-posting link + Apply button + safe HTML→text
+> description. Fixed `serve --db` (was silently ignored). 267 tests green, 89% cov; live-verified.
 
 ## Problem
 
@@ -100,15 +103,34 @@ form in the real browser and click **Submit** yourself. Nothing is sent without 
 
 - **Phase A — durable service + notify + port. ✅ DONE.** `docker-compose.yml`, `JOBAGG_PORT`,
   Telegram run-summary + dashboard link.
-- **Phase B — card UI + detail modal.** Replace the table with cards; modal shows full description,
-  original link, salary/meta, and an Apply button. (Pure dashboard work.)
-- **Phase C — profile + résumé tailoring.** Profile store; LaTeX template intake; the 3-step pipeline
-  with merge-exclusion + preservation scoring; render to PDF; preview in the modal. *Highest-value,
-  lowest-risk half of "auto-apply" — useful even without the browser agent.* Introduces the
-  `AgentBackend` protocol (OpenAI-compatible **and** coding-agent impls).
-- **Phase D — apply agent (opt-in).** browser-use integration; encrypted per-domain session store;
-  headful fill-then-review flow. **ATS field maps first (reliable core); LinkedIn/Naukri best-effort,
-  headful-only, no auto-submit.** Off by default.
+- **Phase B — card UI + detail modal. ✅ DONE.** Table → responsive `.jobs-grid` of clickable
+  `.job-card`s; click → `#job-modal` filled from `GET /api/jobs/{uid}/detail` (facts + flattened
+  description + **Open original posting** link + **Apply** button + quick-actions). Description is
+  flattened HTML→text server-side (`html_to_text`, drops `<script>`/`<style>`) so no source markup
+  renders. Apply (today) opens the posting + marks applied — Track D will hook the agent here.
+  Also fixed a real bug: `serve --db X` was ignored (uvicorn factory got no kwargs) → always served
+  the default DB; now passed via `JOBAGG_DB` env, which also unbreaks the throwaway-DB verify flow.
+  Verified live against a throwaway DB (110 real jobs): grid + detail modal render correctly.
+- **Phase C — profile + résumé tailoring. ✅ DONE.**
+  - `profile/{schema,store}.py` (Pydantic `Profile`), validated YAML loader; **`profile.yaml`**
+    (git-ignored, personal) + `config/profile.example.yaml` (committed placeholder). LaTeX template
+    packaged at `resume/templates/base_resume.tex`.
+  - `apply/backends.py` — `AgentBackend` protocol + **OpenAICompatibleBackend** (any base_url) +
+    **CodingAgentBackend** (subprocess, e.g. `claude -p`) + `build_backend`. Config: `resume.*`.
+  - `resume/tailor.py` — JD-keyword extract → deterministic project/skill **selection** → optional
+    LLM bullet rewrite behind a **merge-exclusion guard** (rejects any rewrite that introduces a
+    number absent from the source → keeps the truthful original) → **preservation scoring** + flags.
+    `backend=None` = pure selection, zero fabrication/cost.
+  - `resume/render.py` — fills the template macros (LaTeX-escaped) → `.tex` → `compile_pdf` (tectonic/
+    pdflatex behind a seam). **Live-verified: real profile → tailored → 108 KB PDF via pdflatex.**
+  - 32 tests (backends/tailor/render/profile). Fully offline-testable.
+- **Phase D — apply agent (opt-in). ⬜ REMAINING (browser half).** Config scaffolding done
+  (`apply.enabled`/`auto_submit=false`). Still to build: encrypted per-domain session store
+  (Playwright `storageState` + Fernet); the browser-use orchestrator (headful, fill-then-review,
+  behind a seam like jobspy's `_scrape_jobs`); ATS field maps first; dashboard Apply-button wiring +
+  a "Tailor résumé" preview in the modal. **Honest caveat:** the live browser fill can't be
+  end-to-end verified in CI (needs a display + real credentials + `pip install '.[apply]'`), so it
+  will ship opt-in with the orchestration logic unit-tested via a fake driver.
 
 ## Risks & how we design around them
 

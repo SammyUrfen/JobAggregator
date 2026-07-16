@@ -1,8 +1,9 @@
-// Minimal vanilla JS (Phase 8). No framework, no CDN.
+// Minimal vanilla JS (Phase 8, +Track B cards/modal). No framework, no CDN.
 //   1) theme toggle -> stamp data-theme on <html>, persist to localStorage
 //   2) "Run now" -> POST /api/runs, then poll GET /api/runs/current until done
-//   3) row actions -> POST /api/jobs/{uid}/action, swap the <tr>
+//   3) job actions (apply/bookmark/hide) -> POST /api/jobs/{uid}/action, swap the .job-card
 //   4) config submit -> PUT /api/config (FormData), surface inline field errors
+//   5) card click -> open detail modal (GET /api/jobs/{uid}/detail); Apply -> open posting + apply
 // Filters are plain GET query params (server-rendered), so no JS needed for those.
 
 (function () {
@@ -10,6 +11,12 @@
 
   const THEME_KEY = "jobagg-theme";
   const POLL_INTERVAL_MS = 2000;
+
+  // uid -> a safe [data-uid="…"] attribute selector (CSS.escape where available).
+  function uidSel(uid) {
+    const esc = window.CSS && CSS.escape ? CSS.escape(uid) : uid.replace(/["\\]/g, "\\$&");
+    return '[data-uid="' + esc + '"]';
+  }
 
   // ---- 1) theme toggle -----------------------------------------------------
   function currentTheme() {
@@ -93,12 +100,10 @@
     }
   };
 
-  // ---- 3) delegated row actions -------------------------------------------
-  document.addEventListener("click", async function (ev) {
-    const btn = ev.target.closest ? ev.target.closest(".row-action") : null;
-    if (!btn) return;
-    const uid = btn.getAttribute("data-uid");
-    const action = btn.getAttribute("data-action");
+  // ---- 3) job actions: apply / bookmark / hide ----------------------------
+  // Post an action, swap the affected card, and (if the modal shows this job) refresh it so both
+  // views stay consistent. Returns true on success.
+  async function postAction(uid, action) {
     try {
       const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/action", {
         method: "POST",
@@ -109,13 +114,94 @@
         let msg = "Action failed.";
         try { msg = (await res.json()).error.message; } catch (_) {}
         alert(msg);
-        return;
+        return false;
       }
       const html = await res.text();
-      const row = btn.closest("tr");
-      if (row) row.outerHTML = html;
+      const card = document.querySelector(".job-card" + uidSel(uid));
+      if (card) card.outerHTML = html;
+      const modal = document.getElementById("job-modal");
+      if (modal && !modal.hidden && modal.querySelector(".jd" + uidSel(uid))) {
+        await refreshModal(uid); // reflect the new applied/bookmarked/hidden state in the open modal
+      }
+      return true;
     } catch (e) {
       alert("Action failed.");
+      return false;
+    }
+  }
+
+  // ---- 5) detail modal -----------------------------------------------------
+  let lastOpener = null; // restore focus here when the modal closes (a11y)
+
+  async function refreshModal(uid) {
+    const body = document.getElementById("job-modal-body");
+    const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/detail", {
+      headers: { Accept: "text/html" },
+    });
+    if (res.ok && body) body.innerHTML = await res.text();
+    return res.ok;
+  }
+
+  async function openModal(uid, opener) {
+    const modal = document.getElementById("job-modal");
+    if (!modal) return;
+    const ok = await refreshModal(uid);
+    if (!ok) { alert("Could not load job details."); return; }
+    lastOpener = opener || null;
+    modal.hidden = false;
+    document.body.classList.add("modal-open");
+    const close = modal.querySelector("[data-modal-close].modal-close");
+    if (close) close.focus();
+  }
+
+  function closeModal() {
+    const modal = document.getElementById("job-modal");
+    if (!modal || modal.hidden) return;
+    modal.hidden = true;
+    document.getElementById("job-modal-body").innerHTML = "";
+    document.body.classList.remove("modal-open");
+    if (lastOpener && lastOpener.focus) lastOpener.focus();
+    lastOpener = null;
+  }
+
+  // One delegated click handler, most-specific target first.
+  document.addEventListener("click", function (ev) {
+    if (!ev.target.closest) return;
+
+    // close the modal (✕ button or backdrop)
+    if (ev.target.closest("[data-modal-close]")) { closeModal(); return; }
+
+    // Apply: open the original posting in a new tab, then mark the job applied
+    const applyBtn = ev.target.closest("[data-apply-uid]");
+    if (applyBtn) {
+      const url = applyBtn.getAttribute("data-apply-url");
+      if (url) window.open(url, "_blank", "noopener");
+      postAction(applyBtn.getAttribute("data-apply-uid"), "apply");
+      return;
+    }
+
+    // apply/bookmark/hide toggle (in a card or the modal footer)
+    const actionBtn = ev.target.closest(".row-action");
+    if (actionBtn) {
+      postAction(actionBtn.getAttribute("data-uid"), actionBtn.getAttribute("data-action"));
+      return;
+    }
+
+    // click anywhere else on a card (not a button/link) -> open its detail modal
+    const card = ev.target.closest(".job-card");
+    if (card && !ev.target.closest("button, a")) {
+      openModal(card.getAttribute("data-uid"), card);
+    }
+  });
+
+  // keyboard: Esc closes the modal; Enter/Space opens a focused card.
+  document.addEventListener("keydown", function (ev) {
+    const modal = document.getElementById("job-modal");
+    if (ev.key === "Escape" && modal && !modal.hidden) { closeModal(); return; }
+    const active = document.activeElement;
+    if ((ev.key === "Enter" || ev.key === " ") && active && active.classList.contains("job-card")) {
+      ev.preventDefault();
+      openModal(active.getAttribute("data-uid"), active);
     }
   });
 

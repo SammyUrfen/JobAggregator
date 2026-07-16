@@ -48,6 +48,18 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# Ship non-Python package resources in wheels too (editable installs read them from src anyway).
+[tool.setuptools.package-data]
+job_aggregator = [
+  "storage/*.sql",
+  "dashboard/templates/*.html",
+  "dashboard/templates/partials/*.html",
+  "dashboard/static/*.svg",
+  "dashboard/static/css/*.css",
+  "dashboard/static/js/*.js",
+  "resume/templates/*.tex",
+]
+
 # ── Ruff: lint + format. Mirrors his C++ -Wall -Wextra -Wpedantic discipline. ──
 [tool.ruff]
 line-length = 100

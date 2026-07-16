@@ -1,0 +1,67 @@
+# Profile TEMPLATE — copy this to `profile.yaml` at the repo root and fill in your real details.
+#
+#   cp config/profile.example.yaml profile.yaml   # then edit profile.yaml
+#
+# `profile.yaml` is git-ignored on purpose (it is your personal résumé content). This example
+# uses placeholders only, so it is safe to commit. Validated against profile/schema.py on load.
+#
+# ⚠️  Truthfulness rule: the tailor may re-order / re-emphasize / re-word what is here, but it must
+#     NEVER invent a project, employer, date, metric, or skill that is not present. Keep it factual.
+# Bullets are PLAIN TEXT facts (no LaTeX) — the renderer adds emphasis/escaping later.
+
+contact:
+  name: Your Full Name
+  email: you@example.com
+  phone: "+00-0000000000"
+  location: City, Country
+  links:
+    - label: LinkedIn
+      url: https://www.linkedin.com/in/your-handle/
+    - label: GitHub
+      url: https://github.com/your-handle
+
+summary: >-
+  One-line factual positioning — who you are and what you build.
+ambitions: >-
+  The kind of role you're aiming for; guides emphasis during tailoring, never fabrication.
+target_roles:
+  - backend engineer
+  - systems engineer
+
+education:
+  - institution: University / Institution Name
+    degree: Degree (e.g. B.Sc. in Computer Science)
+    location: City, Country
+    start: Mon YYYY
+    end: Mon YYYY
+    grade: "CGPA: X.XX"
+    url: https://university.example.edu/
+
+# Formal work/internship experience. Leave as [] for a projects-first résumé.
+experience: []
+
+projects:
+  - name: Project Name
+    tagline: One-line subtitle of what it is
+    url: https://github.com/your-handle/project
+    # tech shows on the résumé; tags are used only to score relevance to a job description.
+    tech: [Language, Framework, Database]
+    tags: [backend, systems, distributed]
+    bullets:
+      - >-
+        One factual achievement line — what you built, a key design decision, and a metric
+        (e.g. throughput, latency, LOC, test count). Keep it true.
+      - >-
+        A second factual line — another concrete decision or result.
+
+skills:
+  - category: Languages
+    items: [Language1, Language2, Language3]
+  - category: Backend & Frameworks
+    items: [Framework1, Framework2]
+  - category: Databases
+    items: [DB1, DB2]
+
+achievements:
+  - "Achievement 1: brief factual context (rank, scale, org)."
+  - "Achievement 2: brief factual context."

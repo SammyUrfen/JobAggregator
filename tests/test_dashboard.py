@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from job_aggregator.clock import FixedClock
 from job_aggregator.config.store import seed_from_yaml
 from job_aggregator.dashboard.app import create_app
+from job_aggregator.dashboard.routes_jobs import MAX_DESC_CHARS, html_to_text
 from job_aggregator.storage.db import connect, init_db
 
 FIXED_NOW = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
@@ -194,7 +195,9 @@ def client(db_path: str) -> Iterator[TestClient]:
 
 
 def _uid_order(html: str) -> list[str]:
-    return re.findall(r'<tr data-uid="(j\d+)"', html)
+    # One match per card (the <article> carries data-uid; its inner action buttons do too, so we
+    # anchor on the card element to keep exactly one hit per job, in render order).
+    return re.findall(r'<article class="job-card" data-uid="(j\d+)"', html)
 
 
 # ── index + filters ─────────────────────────────────────────────────────────────────────
@@ -206,6 +209,13 @@ def test_index_renders_jobs_and_header(client: TestClient) -> None:
     assert "Backend Engineer Intern" in r.text
     assert "JobAggregator" in r.text  # header brand
     assert "Last: success" in r.text  # header last-run summary
+
+
+def test_index_renders_cards_and_modal_container(client: TestClient) -> None:
+    r = client.get("/")
+    assert 'class="jobs-grid"' in r.text
+    assert 'class="job-card"' in r.text
+    assert 'id="job-modal"' in r.text  # the (hidden) detail modal is present for JS to fill
 
 
 def test_default_hides_hidden(client: TestClient) -> None:
@@ -329,6 +339,82 @@ def test_action_invalid_action_422(client: TestClient) -> None:
     r = client.post("/api/jobs/j1/action", json={"action": "frobnicate"})
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "validation_error"
+
+
+def test_action_returns_card_partial(client: TestClient) -> None:
+    r = client.post("/api/jobs/j2/action", json={"action": "apply"})
+    assert r.status_code == 200
+    assert 'class="job-card"' in r.text and 'data-uid="j2"' in r.text  # swappable card, not a row
+
+
+# ── detail modal (Track B) ────────────────────────────────────────────────────────────────
+
+
+def test_detail_renders_link_apply_and_facts(client: TestClient) -> None:
+    r = client.get("/api/jobs/j1/detail")
+    assert r.status_code == 200
+    assert "https://x/j1" in r.text  # link to the original posting
+    assert "Open original posting" in r.text
+    assert "data-apply-url=" in r.text  # the Apply button carries the posting URL
+    assert "Backend Engineer Intern" in r.text
+
+
+def test_detail_unknown_uid_404(client: TestClient) -> None:
+    r = client.get("/api/jobs/nope/detail")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "not_found"
+
+
+def test_detail_flattens_and_sanitizes_html_description(client: TestClient, db_path: str) -> None:
+    conn = connect(db_path)
+    conn.execute(
+        "UPDATE jobs SET description = ? WHERE job_uid = 'j1'",
+        ("<p>Build <b>systems</b> &amp; things.</p><script>alert('xss')</script>",),
+    )
+    conn.commit()
+    conn.close()
+    r = client.get("/api/jobs/j1/detail")
+    assert r.status_code == 200
+    assert "Build systems &amp; things." in r.text  # tags gone, '&' re-escaped by Jinja as text
+    assert "<script>" not in r.text  # source markup never rendered
+    assert "alert(" not in r.text  # script *content* dropped, not just neutralized
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, ""),
+        ("", ""),
+        ("plain text", "plain text"),
+        ("<p>one</p><p>two</p>", "one\ntwo"),
+        ("a<br>b", "a\nb"),
+        ("<ul><li>x</li><li>y</li></ul>", "x\ny"),
+        ("R&amp;D &lt;tag&gt;", "R&D <tag>"),  # entities decoded to text (Jinja re-escapes later)
+        ("<script>evil()</script>keep", "keep"),  # script content dropped
+        ("<p>a</p>\n\n\n<p>b</p>", "a\nb"),  # blank-line runs collapse
+    ],
+)
+def test_html_to_text(raw: str | None, expected: str) -> None:
+    assert html_to_text(raw) == expected
+
+
+def test_html_to_text_caps_length() -> None:
+    assert len(html_to_text("x" * (MAX_DESC_CHARS + 500))) == MAX_DESC_CHARS
+
+
+def test_create_app_reads_jobagg_db_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # `serve --db X` reaches the uvicorn factory only via JOBAGG_DB — create_app must honor it.
+    path = _bare_db(tmp_path)
+    monkeypatch.setenv("JOBAGG_DB", path)
+    app = create_app(clock=FixedClock(FIXED_NOW), scheduler=FakeScheduler(path))
+    assert app.state.db_path == path
+
+
+def test_create_app_explicit_db_beats_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JOBAGG_DB", "/should/be/ignored.db")
+    path = _bare_db(tmp_path)
+    app = create_app(db_path=path, clock=FixedClock(FIXED_NOW), scheduler=FakeScheduler(path))
+    assert app.state.db_path == path
 
 
 # ── config ──────────────────────────────────────────────────────────────────────────────

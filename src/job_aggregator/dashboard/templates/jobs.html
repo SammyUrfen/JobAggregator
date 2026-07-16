@@ -31,27 +31,26 @@
   <button class="btn" type="submit">Filter</button>
 </form>
 
-<div class="card table-wrap">
-  {% if jobs %}
-  <table class="jobs" id="jobs-table">
-    <thead>
-      <tr>
-        <th>Score</th><th>Title</th><th>Company</th><th>Location</th>
-        <th>Pay</th><th>Posted</th><th>Source</th><th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for job in jobs %}{% include 'partials/job_row.html' %}{% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="muted empty" data-testid="empty">No jobs match these filters.</p>
-  {% endif %}
+{% if jobs %}
+<div class="jobs-grid" id="jobs-grid">
+  {% for job in jobs %}{% include 'partials/job_card.html' %}{% endfor %}
 </div>
+{% else %}
+<div class="card"><p class="muted empty" data-testid="empty">No jobs match these filters.</p></div>
+{% endif %}
 
 <nav class="pagination">
   {% if page > 1 %}<a class="btn secondary" href="/?{{ prev_qs }}">← Prev</a>{% endif %}
   <span class="muted mono">Page {{ page }} · {{ total }} total</span>
   {% if page * page_size < total %}<a class="btn secondary" href="/?{{ next_qs }}">Next →</a>{% endif %}
 </nav>
+
+{#- Single detail modal, hidden until a card is opened. Body is fetched from /api/jobs/{uid}/detail
+    and injected by app.js. Backdrop + ✕ + Esc all close it. -#}
+<div class="modal" id="job-modal" hidden>
+  <div class="modal-backdrop" data-modal-close></div>
+  <div class="modal-card card" role="dialog" aria-modal="true" aria-labelledby="job-modal-title">
+    <div class="modal-body" id="job-modal-body"></div>
+  </div>
+</div>
 {% endblock %}

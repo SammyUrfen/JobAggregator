@@ -1,0 +1,30 @@
+{% from 'partials/_macros.html' import salary_badge, quick_actions %}
+{#- One job as a clickable card. The <article> is the click/keyboard target that opens the detail
+    modal (app.js); the action buttons and links inside stop that so they act on their own. -#}
+<article class="job-card" data-uid="{{ job.job_uid }}" tabindex="0" role="button"
+         aria-label="Open details: {{ job.title }} at {{ job.company }}">
+  <div class="jc-head">
+    <span class="jc-score mono" title="match score">
+      {{ '%.0f'|format(job.match_score) if job.match_score is not none else '—' }}
+    </span>
+    <span class="jc-flags">
+      {% if job.applied %}<span class="badge applied" title="Applied">✓</span>{% endif %}
+      {% if job.bookmarked %}<span class="badge bookmarked" title="Bookmarked">★</span>{% endif %}
+    </span>
+  </div>
+  <h3 class="jc-title">{{ job.title }}</h3>
+  <div class="jc-company">{{ job.company }}</div>
+  <div class="jc-meta">
+    {% if job.is_remote %}
+      <span class="badge remote">Remote</span>
+    {% else %}
+      <span class="badge onsite">{{ job.location or 'On-site' }}</span>
+    {% endif %}
+    {{ salary_badge(job) }}
+    <span class="badge source">{{ job.source }}</span>
+  </div>
+  <div class="jc-foot">
+    <span class="muted mono jc-posted">{{ job.posted_at or '—' }}</span>
+    <div class="jc-actions actions">{{ quick_actions(job) }}</div>
+  </div>
+</article>

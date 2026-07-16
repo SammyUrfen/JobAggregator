@@ -72,7 +72,9 @@ def create_app(
     from job_aggregator.scheduler.scheduler import JobScheduler
     from job_aggregator.storage.db import connect
 
-    resolved_db = str(db_path or default_db_path())
+    # Resolution order: explicit arg (tests) → JOBAGG_DB env (how `serve --db X` reaches the
+    # uvicorn factory, which can't take kwargs) → the packaged default.
+    resolved_db = str(db_path or os.environ.get("JOBAGG_DB") or default_db_path())
     resolved_clock: Clock = clock or SystemClock()
     resolved_scheduler: SchedulerProtocol = scheduler or JobScheduler(
         connect_fn=lambda: connect(resolved_db), clock=resolved_clock

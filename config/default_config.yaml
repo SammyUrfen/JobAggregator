@@ -99,6 +99,7 @@ sources:
     opportunities: [internships, jobs]
     search_terms: [backend, "machine learning"]
     max_age_days: 30      # endpoint surfaces stale (2022) posts; recency filter is mandatory
+    max_pages: 5          # pages walked per opportunity before stopping (also stops when empty)
   remoteok:
     enabled: true         # element[0] of the API is a legal notice — skip it; attribution required
   himalayas:
@@ -110,8 +111,10 @@ sources:
   adzuna:
     enabled: true
     country: in           # keys via env ADZUNA_APP_ID / ADZUNA_APP_KEY
+    max_pages: 10         # pages of 50 walked before stopping (also stops on empty/short page)
   jooble:
     enabled: true         # key via env JOOBLE_API_KEY
+    max_pages: 10         # pages walked before stopping (also stops when the API returns none)
   remotive:
     enabled: false        # 24h-delayed + 4 calls/day cap; enable only if you need it
   ats:
@@ -130,6 +133,21 @@ sources:
 
 # Explicitly unsupported dead ends (documented in research.md): twitter, wellfound,
 # hiring_cafe (API Cloudflare-locked; browse manually), jsearch (200 req/month free tier).
+
+resume:
+  # Backend for per-role résumé tailoring: "openai_compatible" (HTTP endpoint) or "coding_agent"
+  # (a local CLI like Claude Code). The API key is read from the env var named below, never here.
+  backend: openai_compatible
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini
+  api_key_env: OPENAI_API_KEY
+  agent_command: [claude, -p]   # used only when backend = coding_agent
+  max_projects: 4               # projects to include on the tailored résumé
+  temperature: 0.2              # low = truthful/deterministic
+
+apply:
+  enabled: false                # the browser apply agent (Track D) is opt-in; OFF by default
+  auto_submit: false            # deliberately unsupported: you always review + submit yourself
 
 notify:
   on: new_only

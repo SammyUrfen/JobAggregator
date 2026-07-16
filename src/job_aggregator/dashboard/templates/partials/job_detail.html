@@ -1,0 +1,61 @@
+{% from 'partials/_macros.html' import salary_badge, quick_actions %}
+{#- Modal body for one job. `description_text` is the source description already stripped to plain
+    text server-side (see routes_jobs.html_to_text); rendered escaped, so no source HTML executes. -#}
+<div class="jd" data-uid="{{ job.job_uid }}">
+  <header class="jd-head">
+    <div class="jd-headings">
+      <h2 class="jd-title" id="job-modal-title">{{ job.title }}</h2>
+      <div class="jd-company">
+        {{ job.company }}{% if job.location %} · {{ job.location }}{% endif %}
+      </div>
+    </div>
+    <button type="button" class="modal-close" data-modal-close aria-label="Close details">✕</button>
+  </header>
+
+  <div class="jd-badges">
+    {% if job.is_remote %}
+      <span class="badge remote">Remote</span>
+    {% else %}
+      <span class="badge onsite">On-site</span>
+    {% endif %}
+    {{ salary_badge(job) }}
+    <span class="badge source">{{ job.source }}</span>
+    <span class="badge status status-{{ job.status }}">{{ job.status }}</span>
+    {% if job.match_score is not none %}
+      <span class="badge mono">score {{ '%.0f'|format(job.match_score) }}</span>
+    {% endif %}
+  </div>
+
+  <dl class="jd-facts mono">
+    <div><dt>Posted</dt><dd>{{ job.posted_at or '—' }}</dd></div>
+    <div><dt>First seen</dt><dd>{{ job.first_seen_at }}</dd></div>
+    <div><dt>Last seen</dt><dd>{{ job.last_seen_at }}</dd></div>
+    {% if job.salary_raw %}<div><dt>Salary (raw)</dt><dd>{{ job.salary_raw }}</dd></div>{% endif %}
+  </dl>
+
+  <div class="jd-desc">
+    {% if description_text %}
+      <div class="jd-desc-body">{{ description_text }}</div>
+    {% else %}
+      <p class="muted">No description provided by the source — open the original posting for details.</p>
+    {% endif %}
+  </div>
+
+  <footer class="jd-foot">
+    <div class="jd-primary">
+      <a class="btn secondary" href="{{ job.url }}" target="_blank" rel="noopener noreferrer">
+        Open original posting ↗
+      </a>
+      {#- Apply: today it opens the posting and marks the job applied (human applies). The auto-fill
+          agent lands in Track D and will hook onto this same button. -#}
+      <button type="button" class="btn apply-btn" data-apply-uid="{{ job.job_uid }}"
+              data-apply-url="{{ job.url }}">
+        {{ '✓ Applied' if job.applied else 'Apply ↗' }}
+      </button>
+    </div>
+    <div class="jd-secondary actions">{{ quick_actions(job) }}</div>
+    <p class="jd-note muted">
+      Auto-fill agent arrives in Track D. For now <b>Apply</b> opens the posting and marks it applied.
+    </p>
+  </footer>
+</div>

@@ -1,0 +1,30 @@
+{# Shared render fragments so the card and the detail modal stay in sync (DRY). #}
+
+{% macro salary_badge(job) %}
+  {%- if job.salary_bucket -%}
+    <span class="badge bucket-{{ job.salary_bucket }} mono">
+      {%- if job.salary_min is not none or job.salary_max is not none -%}
+        ₹{{ job.salary_min if job.salary_min is not none else '?' }}–{{ job.salary_max if job.salary_max is not none else '?' }}/{{ job.salary_period or 'month' }}
+      {%- else -%}
+        {{ job.salary_bucket }}
+      {%- endif -%}
+    </span>
+  {%- endif -%}
+{% endmacro %}
+
+{# The apply / bookmark / hide quick-actions, shared by card and detail footer. #}
+{% macro quick_actions(job) %}
+  <button type="button" class="row-action {% if job.applied %}on{% endif %}"
+          data-uid="{{ job.job_uid }}" data-action="{{ 'unapply' if job.applied else 'apply' }}">
+    {{ '✓ Applied' if job.applied else 'Apply' }}
+  </button>
+  <button type="button" class="row-action {% if job.bookmarked %}on{% endif %}"
+          data-uid="{{ job.job_uid }}" data-action="{{ 'unbookmark' if job.bookmarked else 'bookmark' }}"
+          aria-label="{{ 'Remove bookmark' if job.bookmarked else 'Bookmark' }}">
+    {{ '★' if job.bookmarked else '☆' }}
+  </button>
+  <button type="button" class="row-action {% if job.hidden %}on{% endif %}"
+          data-uid="{{ job.job_uid }}" data-action="{{ 'unhide' if job.hidden else 'hide' }}">
+    {{ 'Unhide' if job.hidden else 'Hide' }}
+  </button>
+{% endmacro %}

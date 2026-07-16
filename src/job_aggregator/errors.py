@@ -21,6 +21,8 @@ class ErrorCode(StrEnum):
     NOTIFY_FAILED = "notify_failed"
     RUN_IN_PROGRESS = "run_in_progress"
     NOT_FOUND = "not_found"
+    AGENT_FAILED = "agent_failed"
+    RENDER_FAILED = "render_failed"
     INTERNAL = "internal"
 
 
@@ -62,3 +64,16 @@ class NotFoundError(JobAggregatorError):
     """A requested entity (job, run, config) does not exist. Maps to HTTP 404."""
 
     code = ErrorCode.NOT_FOUND
+
+
+class AgentError(JobAggregatorError):
+    """An LLM/agent backend call failed (HTTP error, non-zero exit, empty output). Callers should
+    degrade gracefully — tailoring falls back to the untailored profile, never a hard crash."""
+
+    code = ErrorCode.AGENT_FAILED
+
+
+class RenderError(JobAggregatorError):
+    """LaTeX -> PDF compilation failed or no engine is installed."""
+
+    code = ErrorCode.RENDER_FAILED

@@ -46,7 +46,32 @@ coding-agent/Claude Code). Build order A→B→C→D.
   end-of-run summary (`TelegramNotifier.notify_run` → `build_run_summary`, runner step-8b) with a
   dashboard link from `JOBAGG_PUBLIC_URL` / `notify.dashboard_url`; startup catch-up (≥24h gate)
   already handled reboots.
-- **Tracks B–D:** card UI + detail modal → profile + LaTeX résumé tailoring → opt-in apply agent.
+- **Track B (card UI + detail modal): DONE.** Table → `.jobs-grid` of clickable `.job-card`
+  (`partials/job_card.html` + `_macros.html`); click → `#job-modal` filled by
+  `GET /api/jobs/{uid}/detail` (`partials/job_detail.html`): facts + **flattened HTML→text**
+  description (`routes_jobs.html_to_text`, drops `<script>`/`<style>`) + original-posting link +
+  **Apply** (opens posting + marks applied; Track-D agent hooks here) + quick-actions. Action
+  endpoint now returns the card partial. **Bug fixed:** `serve --db X` was ignored (uvicorn
+  factory took no kwargs) → now via `JOBAGG_DB` env (`create_app` reads it); this also unbreaks the
+  throwaway-`--db` verify workflow. 267 tests green, 89% cov; live-verified on a 110-job throwaway DB.
+- **Track C (profile + LaTeX résumé tailoring): DONE.** `profile/` (Pydantic `Profile` +
+  validated YAML loader). **`profile.yaml` is git-ignored** (personal — real résumé content);
+  committed placeholder is `config/profile.example.yaml`. `apply/backends.py` = `AgentBackend`
+  protocol + `OpenAICompatibleBackend` + `CodingAgentBackend` (subprocess) + `build_backend`.
+  `resume/tailor.py` = JD-keyword extract → deterministic project/skill selection → optional LLM
+  rewrite behind a **merge-exclusion guard** (rejects rewrites that add a number absent from source)
+  → preservation scoring + flags (`backend=None` = pure selection, no LLM). `resume/render.py` =
+  fill template (LaTeX-escaped) → `.tex` → `compile_pdf` (tectonic/pdflatex seam). Config: `resume.*`,
+  `apply.*`. **Live-verified: real profile → tailored → 108 KB PDF.** 304 tests green, 89.8% cov.
+- **Coverage pass (this session):** `paginate_until_empty` in `sources/_http.py` (loop until empty/
+  short page/`max_pages` cap; first-page error fails, later-page error keeps earlier). Applied to
+  Adzuna (+`what_or` query targeting), Jooble (+multi-role query), Unstop (per-opportunity). Live:
+  adzuna 50→500, unstop 60→300, jooble 0→200. `max_pages` knobs in config.
+- **Track D (browser apply agent): REMAINING.** Config scaffolded (`apply.enabled`/`auto_submit`
+  both false). To build: encrypted Playwright-`storageState` session store; browser-use orchestrator
+  (headful, fill→review→submit, behind a seam); ATS field maps first; dashboard Apply wiring +
+  "Tailor" preview. Live browser fill needs a display + creds + `pip install '.[apply]'` — ships
+  opt-in, fake-driver-tested.
 
 A multi-agent adversarial audit (ultracode) found **13 real defects**, all now fixed or documented:
 Tier-B salaries now normalized to INR/month in the runner (were bucketed raw → good jobs dropped);

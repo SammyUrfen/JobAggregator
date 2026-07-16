@@ -20,7 +20,7 @@ from job_aggregator.clock import FixedClock
 from job_aggregator.config.schema import Config
 from job_aggregator.errors import SourceError
 from job_aggregator.sources import registry
-from job_aggregator.sources._http import get_json, make_client
+from job_aggregator.sources._http import get_json, make_client, paginate_until_empty
 from job_aggregator.sources.adzuna import AdzunaSource
 from job_aggregator.sources.himalayas import HimalayasSource
 from job_aggregator.sources.jobicy import JobicySource
@@ -141,14 +141,17 @@ def test_adzuna_keys_currency_and_utm(
 def test_jooble_posts_json_body(load_fixture: Loader, now_clock: FixedClock, cfg: Config) -> None:
     with respx.mock:
         route = respx.route(method="POST", host="jooble.org").mock(
-            return_value=httpx.Response(200, json=load_fixture("jooble.json"))
+            side_effect=[
+                httpx.Response(200, json=load_fixture("jooble.json")),
+                httpx.Response(200, json={"jobs": []}),  # page 2 empty -> stop paginating
+            ]
         )
         res = JoobleSource(api_key="KEY", keywords="backend", location="India").fetch(
             cfg, now_clock
         )
     assert res.succeeded is True
-    body = json.loads(route.calls.last.request.content)
-    assert body == {"keywords": "backend", "location": "India"}
+    body = json.loads(route.calls[0].request.content)
+    assert body == {"keywords": "backend", "location": "India", "page": 1}
 
 
 # ── Unstop ──────────────────────────────────────────────────────────────────────────────
@@ -242,6 +245,149 @@ def test_get_json_connect_error_retried() -> None:
         with make_client() as client, pytest.raises(SourceError):
             get_json(client, "https://x.test/j", max_retries=1, sleep=_noop)
     assert route.call_count == 2  # initial + one retry
+
+
+# ── paginate_until_empty helper ───────────────────────────────────────────────────────────
+
+
+def test_paginate_stops_on_empty_page() -> None:
+    calls: list[int] = []
+    pages = {1: [1, 2, 3], 2: [4, 5], 3: []}  # page 3 empty
+
+    def fetch(page: int) -> list[Any]:
+        calls.append(page)
+        return pages[page]
+
+    assert paginate_until_empty(fetch, max_pages=10) == [1, 2, 3, 4, 5]
+    assert calls == [1, 2, 3]  # stopped once the API returned none
+
+
+def test_paginate_stops_on_short_page() -> None:
+    def fetch(page: int) -> list[Any]:
+        return list(range(50)) if page == 1 else list(range(10))  # page 2 is short
+
+    assert len(paginate_until_empty(fetch, max_pages=10, page_size=50)) == 60
+
+
+def test_paginate_respects_max_pages_cap() -> None:
+    assert paginate_until_empty(lambda page: [page], max_pages=3) == [1, 2, 3]  # never empty
+
+
+def test_paginate_first_page_error_propagates() -> None:
+    def fetch(page: int) -> list[Any]:
+        raise SourceError("boom")
+
+    with pytest.raises(SourceError):
+        paginate_until_empty(fetch, max_pages=5)
+
+
+def test_paginate_later_page_error_keeps_earlier() -> None:
+    def fetch(page: int) -> list[Any]:
+        if page == 1:
+            return [1, 2]
+        raise SourceError("rate limited mid-pagination")
+
+    assert paginate_until_empty(fetch, max_pages=5) == [1, 2]  # page-1 kept
+
+
+# ── source pagination + query targeting ─────────────────────────────────────────────────
+
+
+def _adzuna_page(n: int, start: int = 0) -> dict[str, Any]:
+    return {
+        "results": [
+            {
+                "id": str(i),
+                "title": f"Backend Engineer {i}",  # unique -> no within-source dedup
+                "company": {"display_name": "Acme"},
+                "location": {"display_name": "Remote"},
+                "redirect_url": f"https://ex/{i}",
+                "created": "2026-07-14T00:00:00Z",
+            }
+            for i in range(start, start + n)
+        ]
+    }
+
+
+def test_adzuna_paginates_and_query_targets(now_clock: FixedClock, cfg: Config) -> None:
+    with respx.mock:
+        route = respx.route(method="GET", host="api.adzuna.com").mock(
+            side_effect=[
+                httpx.Response(200, json=_adzuna_page(50)),  # full page -> keep going
+                httpx.Response(200, json=_adzuna_page(10, start=50)),  # short -> stop
+            ]
+        )
+        res = AdzunaSource("in", "A", "K", max_pages=5).fetch(cfg, now_clock)
+    assert route.calls.call_count == 2
+    assert res.n_fetched == 60
+    assert route.calls[0].request.url.path.endswith("/search/1")
+    assert route.calls[1].request.url.path.endswith("/search/2")
+    # role keywords became a what_or query (targeted, not generic recent)
+    assert "backend" in route.calls[0].request.url.params["what_or"]
+
+
+def test_adzuna_no_roles_omits_query(now_clock: FixedClock) -> None:
+    bare = Config()  # no roles -> generic recent, no what_or
+    bare.keywords.roles = []
+    with respx.mock:
+        route = respx.route(method="GET", host="api.adzuna.com").mock(
+            return_value=httpx.Response(200, json=_adzuna_page(3))  # short -> one call
+        )
+        AdzunaSource("in", "A", "K").fetch(bare, now_clock)
+    assert "what_or" not in route.calls[0].request.url.params
+
+
+def test_jooble_paginates_until_empty(now_clock: FixedClock, cfg: Config) -> None:
+    def page(jid: str, title: str) -> dict[str, Any]:
+        return {"jobs": [{"id": jid, "title": title, "link": f"https://j/{jid}"}]}
+
+    with respx.mock:
+        route = respx.route(method="POST", host="jooble.org").mock(
+            side_effect=[
+                httpx.Response(200, json=page("1", "Backend Eng")),
+                httpx.Response(200, json=page("2", "ML Eng")),
+                httpx.Response(200, json={"jobs": []}),  # stop
+            ]
+        )
+        res = JoobleSource("K", "backend", "India", max_pages=10).fetch(cfg, now_clock)
+    assert route.calls.call_count == 3
+    assert res.n_fetched == 2
+    assert json.loads(route.calls[1].request.content)["page"] == 2  # page incremented
+
+
+def test_unstop_paginates_per_opportunity(now_clock: FixedClock, cfg: Config) -> None:
+    recent = "2026-07-14T00:00:00Z"  # within the 30-day window of now_clock (2026-07-15)
+
+    def page(n: int, start: int = 0) -> dict[str, Any]:
+        return {
+            "data": {
+                "data": [
+                    {
+                        "id": str(i),
+                        "title": f"Backend {i}",
+                        "updated_at": recent,
+                        "public_url": f"https://u/{i}",
+                        "organisation": {"name": "Org"},
+                    }
+                    for i in range(start, start + n)
+                ]
+            }
+        }
+
+    with respx.mock:
+        route = respx.route(method="GET", host="unstop.com").mock(
+            side_effect=[
+                httpx.Response(200, json=page(30)),  # opp1 page1 full -> continue
+                httpx.Response(200, json=page(5, 30)),  # opp1 page2 short -> stop
+                httpx.Response(200, json=page(2, 100)),  # opp2 page1 short -> stop
+            ]
+        )
+        res = UnstopSource(
+            opportunities=["internships", "jobs"], search_terms=[], max_age_days=30, max_pages=10
+        ).fetch(cfg, now_clock)
+    assert route.calls.call_count == 3  # opp1: 2 pages, opp2: 1 page
+    assert res.n_fetched == 37
+    assert route.calls[1].request.url.params["page"] == "2"
 
 
 # ── registry ────────────────────────────────────────────────────────────────────────────

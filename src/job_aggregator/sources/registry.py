@@ -30,6 +30,8 @@ log = logging.getLogger(__name__)
 
 # Fallback Jooble query when no roles are configured.
 _DEFAULT_JOOBLE_QUERY = "backend intern"
+# How many role keywords to feed Jooble's OR query (keep the query string bounded).
+_JOOBLE_QUERY_TERMS = 6
 
 
 def _build_ats(ats: AtsConfig) -> list[Source]:
@@ -64,15 +66,27 @@ def build_enabled_sources(cfg: Config) -> list[Source]:
     if s.adzuna.enabled:
         app_id, app_key = os.environ.get("ADZUNA_APP_ID"), os.environ.get("ADZUNA_APP_KEY")
         if app_id and app_key:
-            out.append(AdzunaSource(country=s.adzuna.country, app_id=app_id, app_key=app_key))
+            out.append(
+                AdzunaSource(
+                    country=s.adzuna.country,
+                    app_id=app_id,
+                    app_key=app_key,
+                    max_pages=s.adzuna.max_pages,
+                )
+            )
         else:
             log.warning("adzuna enabled but ADZUNA_APP_ID/ADZUNA_APP_KEY unset; skipping")
     if s.jooble.enabled:
         key = os.environ.get("JOOBLE_API_KEY")
         if key:
-            keywords = cfg.keywords.roles[0] if cfg.keywords.roles else _DEFAULT_JOOBLE_QUERY
+            # Jooble treats comma-separated terms as OR; feed several roles, not just the first.
+            keywords = ", ".join(cfg.keywords.roles[:_JOOBLE_QUERY_TERMS]) or _DEFAULT_JOOBLE_QUERY
             location = cfg.locations[0] if cfg.locations else ""
-            out.append(JoobleSource(api_key=key, keywords=keywords, location=location))
+            out.append(
+                JoobleSource(
+                    api_key=key, keywords=keywords, location=location, max_pages=s.jooble.max_pages
+                )
+            )
         else:
             log.warning("jooble enabled but JOOBLE_API_KEY unset; skipping")
     if s.unstop.enabled:
@@ -81,6 +95,7 @@ def build_enabled_sources(cfg: Config) -> list[Source]:
                 opportunities=s.unstop.opportunities,
                 search_terms=s.unstop.search_terms,
                 max_age_days=s.unstop.max_age_days,
+                max_pages=s.unstop.max_pages,
             )
         )
 

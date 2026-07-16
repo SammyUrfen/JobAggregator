@@ -18,6 +18,10 @@ venv/
 # ── Secrets ──
 .env
 
+# ── Personal profile (your real résumé content — never publish) ──
+# Copy config/profile.example.yaml -> profile.yaml and fill in your details locally.
+profile.yaml
+
 # ── Runtime data (DB, generated feed, logs) — never commit ──
 data/*
 !data/.gitkeep

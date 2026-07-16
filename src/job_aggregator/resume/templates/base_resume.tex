@@ -1,0 +1,262 @@
+
+\documentclass[A4,10pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{xcolor}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[
+  colorlinks=true,
+  urlcolor=black,
+  linkcolor=black
+]{hyperref}
+\usepackage[normalem]{ulem}
+
+\definecolor{linkgray}{HTML}{AAAAAA}
+
+\newcommand{\hrefuline}[2]{%
+  \href{#1}{#2\llap{\textcolor{linkgray}{\underline{\phantom{#2}}}}}%
+}
+\newcommand{\hrefplain}[2]{\href{#1}{#2}}
+
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\usepackage{microtype}
+\input{glyphtounicode}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\addtolength{\oddsidemargin}{-0.6in}
+\addtolength{\evensidemargin}{-0.6in}
+\addtolength{\textwidth}{1.2in}
+\addtolength{\topmargin}{-0.7in}
+\addtolength{\textheight}{1.4in}
+
+\urlstyle{same}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\pdfgentounicode=1
+
+%-------------------------
+% Section Formatting
+%-------------------------
+\titleformat{\section}{
+  \vspace{-6pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+%-------------------------
+% Custom Commands
+%-------------------------
+\newcommand{\resumeItem}[1]{
+  \item\small{#1 \vspace{-2pt}}
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & \textbf{\small #2} \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeEduHeading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & \textbf{\small #2} \\
+      \textit{\small #3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[1]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{1.0\textwidth}{l}
+      \small\textbf{#1} \\
+    \end{tabular*}\vspace{-2pt}
+}
+
+\newcommand{\techstack}[1]{
+  \vspace{2pt}
+  {\small\hspace{0.01in}\textit{Tech: #1}}
+  \vspace{-2pt}
+}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}[leftmargin=0.15in]}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+
+%============================================================
+%                        DOCUMENT
+%============================================================
+\begin{document}
+
+%-------------------------
+% HEADER
+%-------------------------
+\begin{center}
+    {\large \scshape YOUR FULL NAME} \\ \vspace{3pt}
+    \small
+    +XX-XXXXXXXXXX $|$
+    \hrefuline{mailto:your.email@example.com}{your.email@example.com} $|$
+    \hrefuline{https://www.linkedin.com/in/your-linkedin}{LinkedIn} $|$
+    \hrefuline{https://github.com/your-github}{GitHub} $|$
+    \hrefuline{https://leetcode.com/u/your-leetcode/}{LeetCode} $|$
+    \hrefuline{https://codeforces.com/profile/your-codeforces}{Codeforces} $|$
+    \hrefuline{https://www.codechef.com/users/your-codechef}{CodeChef}
+\end{center}
+
+%-------------------------
+% EXPERIENCE
+% 3 bullets max per role — keep each to one tight line
+%-------------------------
+\section{Experience}
+\resumeSubHeadingListStart
+
+  \resumeSubheading
+    {\hrefplain{https://company1.com/}{Company Name 1}}{Mon YYYY -- Present}
+    {Job Title}{City, Country}
+    \resumeItemListStart
+      \resumeItem{Lead action verb + what you built + scale or outcome (e.g., serving X requests/day).}
+      \resumeItem{Architecture or design decision that shows technical depth; name the tech.}
+      \resumeItem{Quantified impact — \textbf{X\%} improvement, \textbf{\textasciitilde Xms} latency, \textbf{XK+} events/sec.}
+    \resumeItemListEnd
+
+  \resumeSubheading
+    {\hrefplain{https://company2.com/}{Company Name 2}}{Mon YYYY -- Mon YYYY}
+    {Job Title}{City, Country}
+    \resumeItemListStart
+      \resumeItem{Lead action verb + what you built + scope of impact.}
+      \resumeItem{Key system or product feature; mention any cross-functional collaboration.}
+      \resumeItem{Metric-backed result — \textbf{X\%} reduction in Y, \textbf{\textasciitilde99\%} Z reliability.}
+    \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+%-------------------------
+% PROJECTS
+% 3 bullets max per project
+%-------------------------
+\section{Projects}
+\resumeSubHeadingListStart
+
+  \resumeProjectHeading
+    {\hrefuline{https://github.com/your-github/project-1}{Project Title 1}}
+  \techstack{Language, Framework, Library, Tool}
+    \resumeItemListStart
+      \resumeItem{One-line summary of what it does and why it's interesting technically.}
+      \resumeItem{Key design decision — sharding, eviction policy, protocol, concurrency model.}
+      \resumeItem{Performance or scale result — e.g., \textbf{\textasciitilde50K+ ops/sec} in local benchmarks.}
+    \resumeItemListEnd
+
+  \resumeProjectHeading
+    {\hrefuline{https://your-project-demo.com/}{Project Title 2}}
+  \techstack{Language, Framework, Database}
+    \resumeItemListStart
+      \resumeItem{Brief description of the system and its primary user or use case.}
+      \resumeItem{Notable technical feature — auth, RBAC, third-party integrations, etc.}
+      \resumeItem{Deployment or usage stat — e.g., \textbf{5+ daily active users}, production deployment.}
+    \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+%-------------------------
+% EDUCATION
+%-------------------------
+\section{Education}
+\resumeSubHeadingListStart
+
+  \resumeEduHeading
+    {\hrefplain{https://university1.edu/}{University / Institution Name 1}}{Mon YYYY -- Present}
+    {Degree (e.g., B.Sc. \& M.Sc. in Computer Science)}{City, Country}
+    \resumeItemListStart
+      \resumeItem{GPA / CGPA / CGR: \textbf{X.XX}}
+    \resumeItemListEnd
+
+  \resumeEduHeading
+    {\hrefplain{https://university2.edu/}{University / Institution Name 2} {\small\textit{(optional qualifier)}}}{Mon YYYY -- Present}
+    {Degree (e.g., B.Sc. in Computer Science)}{City, Country}
+    \resumeItemListStart
+      \resumeItem{CGPA: \textbf{X.XX}}
+    \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+%-------------------------
+% TECHNICAL SKILLS
+%-------------------------
+\section{Technical Skills}
+\begin{itemize}[leftmargin=0.0in, label={}]
+\small{\item{
+\begin{tabular}{@{}l@{\hspace{1.5em}}l}
+  \textbf{Languages}              & Language1, Language2, Language3, Language4 \\[3pt]
+  \textbf{Backend \& Frameworks}  & Framework1, Framework2, Framework3, Framework4 \\[3pt]
+  \textbf{Cloud \& DevOps}        & Cloud1, Cloud2, Tool1, Tool2, Tool3 \\[3pt]
+  \textbf{Distributed Systems}    & Technology1, Technology2, Technology3 \\[3pt]
+  \textbf{Databases}              & DB1, DB2, DB3 \\[3pt]
+  \textbf{AI \& Data}             & Library1, Library2, Library3 \\[3pt]
+  \textbf{Core Concepts}          & Concept1, Concept2, Concept3 \\[3pt]
+  \textbf{Tools}                  & Tool1, Tool2, Tool3, Tool4 \\
+\end{tabular}
+}}
+\end{itemize}
+
+%-------------------------
+% ACHIEVEMENTS
+% 3-4 one-liners — competitive programming, hackathons, scholarships, ranks
+%-------------------------
+\section{Achievements}
+\resumeSubHeadingListStart
+  \item
+  \resumeItemListStart
+    \resumeItem{\textbf{Achievement 1:} Brief context — rank, score, or scale (e.g., top X\% out of Y participants, platform name).}
+    \resumeItem{\textbf{Achievement 2:} Brief context — hackathon name, position, team size, or org.}
+    \resumeItem{\textbf{Achievement 3:} Brief context — competitive programming rating, contest, round.}
+    \resumeItem{\textbf{Achievement 4:} Brief context — scholarship, recognition, or open-source contribution.}
+  \resumeItemListEnd
+\resumeSubHeadingListEnd
+
+%-------------------------
+% CERTIFICATIONS
+% List in reverse chronological order. 2-4 entries max for one page.
+%-------------------------
+\section{Certifications}
+\resumeSubHeadingListStart
+  \item
+  \resumeItemListStart
+    \resumeItem{\textbf{Certification Name 1} -- Issuing Organization $|$ \textit{Mon YYYY}}
+    \resumeItem{\textbf{Certification Name 2} -- Issuing Organization $|$ \textit{Mon YYYY}}
+    \resumeItem{\textbf{Certification Name 3} -- Issuing Organization $|$ \textit{Mon YYYY}}
+  \resumeItemListEnd
+\resumeSubHeadingListEnd
+
+%-------------------------
+% VOLUNTEERING
+% 2 bullets max — keep high-level
+%-------------------------
+\section{Volunteering}
+\resumeSubHeadingListStart
+
+  \resumeSubheading
+    {Organization / Committee Name}{Mon YYYY -- Present}
+    {Role / Sub-team}{City, Country}
+    \resumeItemListStart
+      \resumeItem{Primary responsibility — logistics, coordination, or communications at scale.}
+      \resumeItem{Secondary responsibility — data management, stakeholder liaison, or real-time ops.}
+    \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+\end{document}

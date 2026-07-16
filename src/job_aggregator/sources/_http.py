@@ -19,8 +19,7 @@ from job_aggregator.errors import SourceError
 # Several sources (RemoteOK, Himalayas, Unstop) 403 without a real browser UA.
 BROWSER_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/126.0.0.0 Safari/537.36 JobAggregator/0.1 "
-    "(+self-hosted; contact bibekcharah@gmail.com)"
+    "Chrome/126.0.0.0 Safari/537.36 JobAggregator/0.1 (+self-hosted)"
 )
 DEFAULT_TIMEOUT_S = 20.0  # sources are I/O bound; generous but bounded
 DEFAULT_CONNECT_S = 10.0
@@ -93,3 +92,37 @@ def get_json(
                 ) from exc
         raise SourceError(f"HTTP {status} for {url}", details={"url": url, "status": status})
     raise SourceError(f"request failed for {url}", details={"url": url}) from last_exc
+
+
+def paginate_until_empty(
+    fetch_page: Callable[[int], list[Any]],
+    *,
+    max_pages: int,
+    page_size: int | None = None,
+    start_page: int = 1,
+) -> list[Any]:
+    """Accumulate items page-by-page until the API signals completion or a safety cap.
+
+    Stops on: an EMPTY page (the API's "no more postings" signal), a SHORT final page
+    (< page_size, when page_size is known), or `max_pages` — whichever comes first. An unbounded
+    "loop until empty" is a footgun (rate limits, runaway runs), so max_pages is a hard valve.
+
+    Failure policy: a SourceError on the FIRST page propagates (the source reports failed); a
+    SourceError on a LATER page stops pagination but KEEPS the pages already fetched — a mid-run
+    rate-limit shouldn't discard good data (Reliability). `fetch_page(page)` returns the page's
+    list of raw items (empty list = no results).
+    """
+    items: list[Any] = []
+    for offset in range(max_pages):
+        try:
+            batch = fetch_page(start_page + offset)
+        except SourceError:
+            if offset == 0:
+                raise  # first page failed -> the source genuinely failed
+            break  # keep earlier pages
+        if not batch:
+            break
+        items.extend(batch)
+        if page_size is not None and len(batch) < page_size:
+            break
+    return items
