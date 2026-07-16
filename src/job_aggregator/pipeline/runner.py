@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Protocol
 from job_aggregator.config.schema import Config
 from job_aggregator.errors import RunInProgressError
 from job_aggregator.pipeline.filters import score_and_filter
-from job_aggregator.pipeline.salary import salary_bucket
+from job_aggregator.pipeline.salary import convert_bounds, salary_bucket
 from job_aggregator.pipeline.stale import expire_stale
 from job_aggregator.sources.base import Source, SourceResult
 from job_aggregator.storage import jobs_repo, runs_repo
@@ -198,6 +198,30 @@ def _record_source_runs(
     return succeeded, n_ok, n_err, errors
 
 
+def _normalize_salary(job: Job, cfg: Config) -> None:
+    """Convert a Job's salary to INR/month in place before bucketing.
+
+    Tier-B adapters (base.to_job) ship RAW source amounts (e.g. USD/hour); JobSpy already
+    converts, so this is a no-op there (INR/month → INR/month is identity). Idempotent. When
+    the amount cannot be converted (unknown currency / missing period), salary_parsed is set to
+    False so the job buckets UNKNOWN rather than being mis-compared against INR/month floors.
+    """
+    raw_present = job.salary_min is not None or job.salary_max is not None
+    s_min, s_max, parsed = convert_bounds(
+        job.salary_min, job.salary_max, job.salary_currency, job.salary_period, cfg.salary.fx_rates
+    )
+    if parsed:
+        if job.salary_raw is None and raw_present:  # preserve the pre-conversion figure
+            job.salary_raw = (
+                f"{job.salary_currency or ''} {job.salary_min}-{job.salary_max}"
+                f"/{job.salary_period or ''}"
+            ).strip()
+        job.salary_min, job.salary_max = s_min, s_max
+        job.salary_currency = cfg.salary.currency
+        job.salary_period = "month"
+    job.salary_parsed = parsed
+
+
 def _filter_and_upsert(
     conn: sqlite3.Connection,
     run_id: int,
@@ -210,6 +234,7 @@ def _filter_and_upsert(
         if not res.succeeded:
             continue  # never ingest a source we couldn't see
         for job in res.jobs:
+            _normalize_salary(job, cfg)  # to INR/month for ALL sources (Tier-B ships raw)
             job.salary_bucket = salary_bucket(job, cfg)  # uniform bucket for ALL sources
             verdict = score_and_filter(job, cfg)
             if not verdict.keep:

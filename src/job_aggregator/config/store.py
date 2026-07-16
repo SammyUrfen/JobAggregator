@@ -60,7 +60,12 @@ def seed_from_yaml(conn: sqlite3.Connection, yaml_path: Path | None = None) -> N
 
 def load_effective_config(conn: sqlite3.Connection) -> Config:
     """Read + validate the single config row. Raises ConfigError if it is missing or invalid."""
-    row = conn.execute("SELECT data FROM config WHERE id = 1").fetchone()
+    try:
+        row = conn.execute("SELECT data FROM config WHERE id = 1").fetchone()
+    except sqlite3.OperationalError as exc:
+        # `connect()` lazily creates an empty, table-less file, so a fresh path reaches here with
+        # "no such table: config". Turn that into the friendly first-run hint, not a raw traceback.
+        raise ConfigError("database not initialized — run `initdb` first") from exc
     if row is None:
         raise ConfigError("no config row present — run `initdb` first")
     try:

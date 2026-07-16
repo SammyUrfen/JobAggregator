@@ -1,0 +1,63 @@
+# job-aggregator.service — OPTIONAL systemd oneshot for the daily fetch run.
+#
+# This is a best-effort TEMPLATE — EDIT the placeholders (User, WorkingDirectory,
+# ExecStart interpreter path) before enabling. It runs `python -m job_aggregator run`
+# once and exits (Type=oneshot); the companion job-aggregator.timer schedules it daily.
+#
+# ── IMPORTANT: pick ONE scheduler ─────────────────────────────────────────────────────
+# If you use this .timer to drive daily fetches, do NOT also let `serve`'s in-process
+# APScheduler run — otherwise every source is fetched twice. Either:
+#   • start the dashboard as `serve` with JOBAGG_DISABLE_SCHEDULER=1 in its environment, or
+#   • don't run `serve` at all (this timer + the dashboard are independent).
+# `run` reaps orphaned 'running' rows and auto-initializes the DB, so it is safe to fire
+# on a schedule with no `initdb` first.
+#
+# Install:
+#   cp deploy/job-aggregator.service deploy/job-aggregator.timer /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now job-aggregator.timer
+# Test the unit once, immediately:
+#   systemctl start job-aggregator.service   &&   journalctl -u job-aggregator -e
+
+[Unit]
+Description=JobAggregator daily fetch/dedup/stale-delete run
+Documentation=file:///home/SammyUrfen/Codes/job%20aggregator/PLAN.md
+# Only meaningful once the network is up (sources are fetched over HTTP).
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+
+# ── EDIT THESE ────────────────────────────────────────────────────────────────────────
+# Run as your own (non-root) user, not root.
+User=SammyUrfen
+# Repo root. Note the SPACE in the path — systemd handles it fine unquoted here, but keep
+# it exact. Config, config/default_config.yaml, and .env are resolved relative to this.
+WorkingDirectory=/home/SammyUrfen/Codes/job aggregator
+
+# ExecStart MUST use the interpreter from the conda env `job-aggregator` (Python 3.11) —
+# a bare `python` will almost certainly be the wrong one under systemd's minimal PATH.
+# Use the ABSOLUTE interpreter path (this is the documented env in CLAUDE.md):
+ExecStart=/home/SammyUrfen/miniconda3/envs/job-aggregator/bin/python -m job_aggregator run
+# Alternative if you prefer conda's own launcher:
+#   ExecStart=/home/SammyUrfen/miniconda3/bin/conda run -n job-aggregator python -m job_aggregator run
+
+# Secrets come from .env (never the DB). systemd does NOT auto-load .env; point at it here.
+# `-` prefix = don't fail the unit if the file is absent (sources needing keys will just skip).
+EnvironmentFile=-/home/SammyUrfen/Codes/job aggregator/.env
+# Persist the DB/feed/logs somewhere stable (defaults to <WorkingDirectory>/data if unset).
+# Environment=JOBAGG_DATA_DIR=/home/SammyUrfen/Codes/job aggregator/data
+
+# A single run is bounded; don't let a wedged source hang forever. Tune as needed.
+TimeoutStartSec=1800
+
+# Light hardening — safe for a oneshot that only writes under its data dir. Loosen if it
+# trips on your setup (e.g. conda under /home is fine with ProtectHome disabled below).
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+# oneshot units don't strictly need [Install], but this lets you `systemctl enable` the
+# service directly for manual/on-demand use. The .timer is the normal trigger.
+WantedBy=multi-user.target

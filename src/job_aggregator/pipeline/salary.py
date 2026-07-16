@@ -28,9 +28,9 @@ _PERIOD_TO_MONTH = {
 
 
 def representative_inr(mn: int | None, mx: int | None) -> int | None:
-    """A single comparison figure: the midpoint when both bounds exist, else whichever is set."""
-    if mn is not None and mx is not None:
-        return (mn + mx) // 2
+    """The figure the salary gate compares to the floor. PLAN §4.3: use salary_max if present,
+    else salary_min — i.e. keep a job if the top of its range could clear the floor (a wide
+    range like 10k-40k should not be dropped just because its midpoint is below the floor)."""
     return mx if mx is not None else mn
 
 

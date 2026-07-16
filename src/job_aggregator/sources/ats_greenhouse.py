@@ -46,7 +46,7 @@ class GreenhouseSource(Source):
     def _map(item: Any, token: str) -> RawPosting:
         location = (item.get("location") or {}).get("name") or ""
         return RawPosting(
-            source="greenhouse",
+            source=f"greenhouse_{token}",  # per-company tag -> per-company stale guard
             source_native_id=str(item.get("id")),
             title=str(item.get("title", "")),
             company=str(item.get("company_name") or token),

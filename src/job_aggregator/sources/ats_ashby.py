@@ -66,7 +66,7 @@ class AshbySource(Source):
                 period = _ashby_period(str(comp_part.get("interval", "")))
                 break
         return RawPosting(
-            source="ashby",
+            source=f"ashby_{org}",  # per-company tag -> per-company stale guard
             source_native_id=str(item.get("id")),
             title=str(item.get("title", "")),
             company=str(item.get("organizationName") or org),

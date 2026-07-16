@@ -68,6 +68,9 @@ def test_content_hash_is_location_sensitive() -> None:
         ("https://x.com/a/?utm_medium=x", "https://x.com/a"),  # trailing slash + utm dropped
         ("", ""),
         ("not a url", "not a url"),  # bare/relative string returned as-is
+        ("javascript:alert(document.domain)", ""),  # XSS scheme blocked
+        ("JavaScript:alert(1)", ""),  # case-insensitive scheme block
+        ("data:text/html,<script>alert(1)</script>", ""),
     ],
 )
 def test_canonical_url(url: str, expected: str) -> None:

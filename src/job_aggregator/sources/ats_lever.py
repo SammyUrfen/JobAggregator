@@ -63,7 +63,7 @@ class LeverSource(Source):
         sr = item.get("salaryRange") or {}
         categories = item.get("categories") or {}
         return RawPosting(
-            source="lever",
+            source=f"lever_{slug}",  # per-company tag -> per-company stale guard
             source_native_id=str(item.get("id")),
             title=str(item.get("text", "")),
             company=slug,

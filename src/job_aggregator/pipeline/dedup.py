@@ -80,6 +80,8 @@ _TRACKING_PARAMS = frozenset(
 )
 # rapidfuzz token_sort_ratio at/above which two titles are treated as the same role.
 FUZZY_TITLE_THRESHOLD = 88
+# Only these URL schemes are allowed to survive canonicalization (others -> "" to block XSS).
+_ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
@@ -131,6 +133,10 @@ def canonical_url(url: str) -> str:
     parts = urlsplit(url)
     if not parts.scheme and not parts.netloc:
         return url
+    # Security: only http(s) may reach an href. Drop javascript:/data:/vbscript: etc. so a
+    # poisoned job URL from a third-party board can't become a clickable XSS vector.
+    if parts.scheme and parts.scheme.lower() not in _ALLOWED_URL_SCHEMES:
+        return ""
     kept = [
         (k, v)
         for k, v in parse_qsl(parts.query, keep_blank_values=False)

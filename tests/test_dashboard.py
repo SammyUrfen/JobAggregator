@@ -355,6 +355,20 @@ def test_config_put_valid_saves_and_preserves_fx_rates(client: TestClient, db_pa
     assert cfg["salary"]["fx_rates"] == {"USD": 83.0, "EUR": 90.0, "GBP": 105.0}  # preserved
 
 
+def test_config_put_can_disable_toggles(client: TestClient, db_path: str) -> None:
+    # Regression: a boolean toggle must be turn-OFF-able, not just turn-on-able. The JS sends an
+    # explicit "false" for unchecked boxes; verify the server disables the setting.
+    r = client.put("/api/config", data={"src_remoteok": "false", "notify_rss_enabled": "false"})
+    assert r.status_code == 200
+    conn = connect(db_path)
+    cfg = __import__("json").loads(
+        conn.execute("SELECT data FROM config WHERE id=1").fetchone()["data"]
+    )
+    conn.close()
+    assert cfg["sources"]["remoteok"]["enabled"] is False
+    assert cfg["notify"]["rss"]["enabled"] is False
+
+
 @pytest.mark.parametrize(
     ("field_name", "value", "dotted"),
     [

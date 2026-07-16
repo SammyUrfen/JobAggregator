@@ -35,10 +35,17 @@ def test_to_inr_month(
 
 
 def test_representative_inr() -> None:
-    assert salary.representative_inr(30000, 50000) == 40000
+    # PLAN §4.3: compare using salary_max if present, else salary_min (keep-if-top-could-clear).
+    assert salary.representative_inr(30000, 50000) == 50000
     assert salary.representative_inr(None, 50000) == 50000
     assert salary.representative_inr(30000, None) == 30000
     assert salary.representative_inr(None, None) is None
+
+
+def test_wide_range_kept_when_max_clears_floor(cfg: Config, make_job: JobFactory) -> None:
+    # A remote 10k-40k job (floor 30k): max clears the floor so it must PASS, not be dropped.
+    job = make_job(is_remote=True, salary_parsed=True, salary_min=10000, salary_max=40000)
+    assert salary.salary_bucket(job, cfg) is SalaryBucket.PASS
 
 
 @pytest.mark.parametrize(

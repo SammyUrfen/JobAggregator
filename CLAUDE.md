@@ -28,9 +28,23 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   `dashboard/static/css/theme.css`.
 
 ## Current status
-**Phases 0–8 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
-all clean; `pytest` 211 passed / 1 skipped; **live cycle** writes+dedups jobs, emits a valid
-Atom feed.xml, and the **dashboard serves** at all routes). Done:
+**COMPLETE — Phases 0–9 implemented, audited, and verified.** Full gate green: `ruff check .`,
+`ruff format --check .`, `mypy src`, `pytest` (242 passed / 0 skipped; coverage **89% overall**,
+**94% correctness-core**, hard gate 85%). Verified live: a real cycle writes+dedups jobs and emits
+a valid Atom `feed.xml`; the dashboard serves all routes and auto-initializes on first run.
+
+A multi-agent adversarial audit (ultracode) found **13 real defects**, all now fixed or documented:
+Tier-B salaries now normalized to INR/month in the runner (were bucketed raw → good jobs dropped);
+dashboard config checkboxes can be turned OFF (JS sends explicit true/false); crashed 'running' runs
+self-heal via `runs_repo.reconcile_orphan_runs` (were a permanent wedge); `javascript:`/`data:` job
+URLs stripped in `canonical_url` (stored XSS); salary gate uses max-of-range per §4.3; ATS is now
+per-company stale-isolated; `run`/`serve` auto-init + friendly errors; location matching is
+whole-token. Cross-process run-lock, fuzzy-dedup gap, and no-auth dashboard are documented limitations.
+
+Docs: `README.md`, `docs/{ats_token_lists,testing}.md`, `TROUBLESHOOTING.md`; deploy extras
+`Dockerfile`, `.dockerignore`, `deploy/job-aggregator.{service,timer}`.
+
+Phase-by-phase history (each shipped green, `mypy`/`ruff`/`pytest` clean):
 - **Phase 0** — foundation: package skeleton, `errors`/`clock`/`paths`/`logging`, tooling gate.
 - **Phase 1** — storage core: `storage/{db,jobs_repo,runs_repo,schema.sql}`, `models/job.py`,
   `config/{schema,store}` (idempotent upsert w/ user-flag preservation; run bookkeeping).

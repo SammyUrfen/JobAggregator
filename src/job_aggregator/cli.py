@@ -38,17 +38,22 @@ def cmd_initdb(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Run one aggregation cycle now. Implemented in Phase 5/6."""
+    """Run one aggregation cycle now."""
     from job_aggregator.clock import SystemClock
-    from job_aggregator.config.store import load_effective_config
+    from job_aggregator.config.store import load_effective_config, seed_from_yaml
     from job_aggregator.logging_setup import configure_logging
     from job_aggregator.pipeline.runner import run_cycle
-    from job_aggregator.storage.db import connect
+    from job_aggregator.storage import runs_repo
+    from job_aggregator.storage.db import connect, init_db
 
     configure_logging(args.log_level)
+    clock = SystemClock()
     conn = connect(args.db)
+    init_db(conn)  # idempotent — `run` works even without a prior `initdb`
+    seed_from_yaml(conn)  # idempotent — seeds config only if absent
+    runs_repo.reconcile_orphan_runs(conn, clock)  # self-heal a run a crash left 'running'
     cfg = load_effective_config(conn)
-    summary = run_cycle(conn, cfg, SystemClock(), trigger="manual")
+    summary = run_cycle(conn, cfg, clock, trigger="manual")
     print(summary)
     return 0
 

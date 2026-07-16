@@ -230,6 +230,31 @@ def test_filtered_job_not_inserted(
     assert summary.status == "success"  # source succeeded; the job was just filtered out
 
 
+def test_tier_b_salary_normalized_to_inr_month(
+    conn: sqlite3.Connection, clock: FixedClock, sample_config: Config
+) -> None:
+    # A Tier-B job ships raw USD/hour pay; the runner must convert it to INR/month before
+    # bucketing so a high-paying remote role isn't wrongly dropped as below-floor.
+    raw = make_job(
+        "s",
+        source="himalayas",
+        is_remote=True,
+        salary_min=50,
+        salary_max=50,
+        salary_currency="USD",
+        salary_period="hour",
+        salary_parsed=True,
+    )
+    run_cycle(
+        conn, sample_config, clock, "manual", sources=[FakeSource("himalayas", [raw])], notifiers=[]
+    )
+    row = _row(conn, "s")
+    assert row["salary_currency"] == "INR"
+    assert row["salary_period"] == "month"
+    assert row["salary_min"] > 100000  # 50 USD/hr ≈ 719k INR/month
+    assert row["salary_bucket"] == "pass"  # remote, far above the 30k floor
+
+
 def test_subsource_guard_is_per_site(
     conn: sqlite3.Connection, clock: FixedClock, sample_config: Config
 ) -> None:

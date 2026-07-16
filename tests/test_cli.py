@@ -7,21 +7,69 @@ See PLAN.md Part II (Phase 6) for the exact cases to implement.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from job_aggregator import cli
+from job_aggregator import __version__, cli
 from job_aggregator.errors import ConfigError
 from job_aggregator.pipeline import runner
 from job_aggregator.pipeline.runner import RunSummary
+
+# Heavy deps that must NOT be imported just by importing the CLI (so `--help`/`--version` are fast
+# and work before `pip install` of the full runtime).
+_HEAVY_MODULES = {"fastapi", "jobspy", "uvicorn", "apscheduler", "pandas", "httpx"}
 
 
 def test_version_exits_zero() -> None:
     with pytest.raises(SystemExit) as exc:
         cli.main(["--version"])
     assert exc.value.code == 0
+
+
+def test_version_prints_version(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+    assert __version__ in capsys.readouterr().out
+
+
+def test_help_exits_zero() -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--help"])
+    assert exc.value.code == 0
+
+
+def test_no_subcommand_exits_2() -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.main([])
+    assert exc.value.code == 2  # argparse "required subcommand" error
+
+
+@pytest.mark.parametrize("sub", ["initdb", "run", "serve", "show-config"])
+def test_all_subcommands_parse(sub: str) -> None:
+    args = cli.build_parser().parse_args([sub, "--db", "/tmp/x.db"])
+    assert args.command == sub
+    assert callable(args.func)
+
+
+def test_cli_import_is_stdlib_only() -> None:
+    # Importing the CLI module must not pull heavy runtime deps into sys.modules.
+    code = (
+        "import sys, job_aggregator.cli\n"
+        f"heavy = {_HEAVY_MODULES!r}\n"
+        "leaked = sorted(heavy & set(sys.modules))\n"
+        "print(','.join(leaked))\n"
+        "sys.exit(1 if leaked else 0)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, (
+        f"heavy imports leaked on `import job_aggregator.cli`: {result.stdout.strip()}"
+    )
 
 
 def test_initdb_then_show_config(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

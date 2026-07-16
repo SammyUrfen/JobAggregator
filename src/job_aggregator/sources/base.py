@@ -205,27 +205,49 @@ def build_result(
     return SourceResult.ok(source, jobs, duration_ms=duration_ms)
 
 
+def ats_sub_name(source: str, company: str) -> str:
+    """The per-company (sub-)source id, e.g. 'greenhouse_razorpay'. Each company's jobs are
+    tagged with this so the stale-delete guard is per-company (a transient 500 on one board
+    must not expire another company's still-valid postings) — the same isolation JobSpy gets
+    per-site. Adapters MUST tag Job.source identically."""
+    return f"{source}_{company}"
+
+
 def run_ats(
     source: str,
     companies: list[str],
     fetch_one: Callable[[Any, str], list[RawPosting]],
     client: Any,
 ) -> SourceResult:
-    """ATS per-company loop. A per-company EMPTY result is legitimate (no openings); only an
-    ERROR (SourceError) marks a company failed. See ATS_REQUIRE_ALL_COMPANIES for the policy."""
+    """ATS per-company loop with per-company failure isolation. A per-company EMPTY result is
+    legitimate (no openings); only an ERROR (SourceError) marks a company failed. Emits one
+    sub_results entry per company so expire_stale only touches companies that succeeded."""
     jobs: list[Job] = []
     failed: list[str] = []
+    sub_results: list[tuple[str, bool, int]] = []
     ok = 0
     for company in companies:
+        sub_name = ats_sub_name(source, company)
         try:
             raws = fetch_one(client, company)
         except SourceError as exc:
             failed.append(f"{company}: {exc}")
+            sub_results.append((sub_name, False, 0))
             continue
         ok += 1
-        jobs.extend(to_job(r) for r in raws)
+        company_jobs = [to_job(r) for r in raws]
+        jobs.extend(company_jobs)
+        sub_results.append((sub_name, True, len(company_jobs)))
+    error = "; ".join(failed) or None
     if ATS_REQUIRE_ALL_COMPANIES and failed:
         return SourceResult.failed(source, f"strict mode: {len(failed)} failed: {failed}")
     if ok == 0:
         return SourceResult.failed(source, f"all {len(companies)} companies failed: {failed}")
-    return SourceResult.ok(source, jobs)
+    return SourceResult(
+        source=source,
+        succeeded=True,
+        jobs=jobs,
+        n_fetched=len(jobs),
+        error=error,
+        sub_results=sub_results,
+    )

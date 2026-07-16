@@ -101,5 +101,21 @@ ignore_missing_imports = true
 # ── Pytest ──
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers --cov=job_aggregator --cov-report=term-missing --cov-fail-under=85"
 pythonpath = ["src"]
+markers = [
+    "network: real network I/O; deselected by default. Run with `-m network`.",
+    "slow: slower integration test (e2e, full run_cycle).",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["job_aggregator"]
+# Network-bound adapters + the thin CLI/dashboard shells are exercised by respx-mocked and
+# TestClient tests, but their line coverage is noisy and would mask the correctness core; the
+# hard gate is on storage/pipeline/config/models/sources/scheduler/notify.
+omit = ["*/__main__.py", "*/cli.py", "*/dashboard/*", "*/logging_setup.py"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]

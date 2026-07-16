@@ -1,0 +1,25 @@
+# job-aggregator.timer — OPTIONAL daily trigger for job-aggregator.service.
+#
+# Best-effort TEMPLATE. Fires the oneshot service once a day at ~03:00 local time. See
+# job-aggregator.service for the "pick ONE scheduler" warning (don't also run serve's
+# in-process APScheduler, or set JOBAGG_DISABLE_SCHEDULER=1 on serve).
+#
+# Enable:  systemctl enable --now job-aggregator.timer
+# Inspect: systemctl list-timers job-aggregator.timer   (shows NEXT / LAST fire)
+
+[Unit]
+Description=Run JobAggregator once daily (~03:00 local)
+Documentation=file:///home/SammyUrfen/Codes/job%20aggregator/deploy/job-aggregator.service
+
+[Timer]
+# 03:00 every day, local timezone. Adjust to taste; the project targets ~once/24h.
+OnCalendar=*-*-* 03:00:00
+# If the machine was asleep/off at 03:00 (laptop!), run as soon as it's back up.
+Persistent=true
+# Jitter up to 5 min so we're not hammering sources exactly on the minute.
+RandomizedDelaySec=300
+# Bind this timer's lifecycle to the matching .service of the same name.
+Unit=job-aggregator.service
+
+[Install]
+WantedBy=timers.target

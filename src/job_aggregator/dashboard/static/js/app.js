@@ -65,23 +65,31 @@
     }
   }
 
+  function stopPolling(btn) {
+    if (polling) { clearInterval(polling); polling = null; }
+    if (btn) btn.disabled = false;
+  }
+
   window.runNow = async function () {
     const btn = document.getElementById("run-now-btn");
+    // Immediate feedback: the trigger blocks for the whole cycle, so show 'running' and start the
+    // poller NOW (the run row is created at cycle start) rather than after the POST returns.
+    if (btn) btn.disabled = true;
+    setPill("running");
+    if (!polling) polling = setInterval(poll, POLL_INTERVAL_MS);
     try {
       const res = await fetch("/api/runs", { method: "POST", headers: { Accept: "application/json" } });
       if (res.status === 409) {
         alert("A run is already in progress.");
-        return;
+        return; // keep polling — the in-progress run will report completion
       }
       if (!res.ok) {
         alert("Could not start a run.");
-        return;
+        stopPolling(btn);
       }
-      if (btn) btn.disabled = true;
-      setPill("running");
-      if (!polling) polling = setInterval(poll, POLL_INTERVAL_MS);
     } catch (e) {
       alert("Could not start a run.");
+      stopPolling(btn);
     }
   };
 
@@ -119,7 +127,13 @@
       document.querySelectorAll(".field-error").forEach((el) => (el.textContent = ""));
       const banner = document.getElementById("config-banner");
       try {
-        const res = await fetch("/api/config", { method: "PUT", body: new FormData(configForm) });
+        // Browsers OMIT unchecked checkboxes from FormData, which would make every toggle
+        // one-way (on-only). Force an explicit true/false for each so a box can be turned OFF.
+        const fd = new FormData(configForm);
+        configForm.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+          fd.set(cb.name, cb.checked ? "true" : "false");
+        });
+        const res = await fetch("/api/config", { method: "PUT", body: fd });
         const data = await res.json();
         if (res.ok) {
           if (banner) { banner.textContent = data.message || "Saved."; banner.className = "banner ok"; }

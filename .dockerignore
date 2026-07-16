@@ -1,0 +1,40 @@
+# .dockerignore — mirrors .gitignore. Keeps the build context small and, more importantly,
+# keeps secrets (.env) and host runtime data (data/, the SQLite DB) OUT of the image.
+# The container writes its own data under the /data volume (JOBAGG_DATA_DIR).
+
+# ── VCS ──
+.git/
+.gitignore
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Virtual envs (conda env `job-aggregator` lives outside the repo) ──
+.venv/
+venv/
+
+# ── Secrets — never bake into an image layer ──
+.env
+
+# ── Runtime data (host DB, generated feed, logs) — the container uses its own /data volume ──
+data/
+
+# ── Editor / OS ──
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ── Container/deploy files not needed inside the build ──
+Dockerfile
+.dockerignore

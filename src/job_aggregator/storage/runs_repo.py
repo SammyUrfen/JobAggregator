@@ -112,3 +112,18 @@ def last_successful_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
         "SELECT * FROM runs WHERE status = 'success' ORDER BY run_id DESC LIMIT 1"
     ).fetchone()
     return row
+
+
+def reconcile_orphan_runs(conn: sqlite3.Connection, clock: Clock) -> int:
+    """Finalize any 'running' run left behind by a crash/kill (finish_run never ran). Returns the
+    count reaped. Called at process startup: the in-process scheduler is single-instance, so a
+    'running' row at boot is by definition abandoned — and if left as-is, current_run() would keep
+    rejecting every future cycle (the permanent-wedge bug). Idempotent (no-op when none exist)."""
+    cur = conn.execute(
+        "UPDATE runs SET status = 'failed', finished_at = ?, "
+        "error = COALESCE(error, 'abandoned: process restarted while a run was in progress') "
+        "WHERE status = 'running'",
+        (clock.now().isoformat(),),
+    )
+    conn.commit()
+    return cur.rowcount

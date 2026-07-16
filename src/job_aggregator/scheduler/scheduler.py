@@ -2,9 +2,14 @@
 
 APScheduler `BackgroundScheduler` (3.x): a cycle is blocking sqlite/httpx work, so it runs on
 the scheduler's own pool thread, never an event loop. Each run opens its OWN sqlite connection
-inside the job body (connections aren't thread-safe to share) via the `connect_fn` factory. One
-lock funnel: a process-local non-blocking `threading.Lock` PLUS a `runs_repo.current_run` DB
-check, so manual + scheduled + cross-process runs never overlap.
+inside the job body (connections aren't thread-safe to share) via the `connect_fn` factory.
+
+Overlap protection: a process-local non-blocking `threading.Lock` funnels manual + scheduled runs
+WITHIN this process (they never overlap), plus a `runs_repo.current_run` DB check. The DB check is
+best-effort across PROCESSES — the check-then-insert is not one atomic transaction — so in a
+multi-process deployment (e.g. a systemd `.timer` running `job-aggregator run`), don't also let
+the in-process scheduler run: set `JOBAGG_DISABLE_SCHEDULER=1` for `serve`. Orphaned 'running' rows
+left by a crash are reaped at startup by `reconcile_orphan_runs`.
 """
 
 from __future__ import annotations
@@ -51,10 +56,14 @@ class JobScheduler:
         from apscheduler.triggers.cron import CronTrigger
 
         from job_aggregator.config.store import load_effective_config
+        from job_aggregator.storage import runs_repo
 
         conn = cast("sqlite3.Connection", self._connect_fn())
         try:
             run_hour = load_effective_config(conn).schedule.run_hour_local
+            reaped = runs_repo.reconcile_orphan_runs(conn, self._clock)
+            if reaped:
+                log.warning("reconciled %d orphaned 'running' run(s) from a prior crash", reaped)
         finally:
             conn.close()
         if self._scheduler is None:

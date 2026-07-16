@@ -53,7 +53,7 @@ class SmartRecruitersSource(Source):
         parts = [loc.get("city"), loc.get("region"), loc.get("country")]
         location = ", ".join(str(p) for p in parts if p) or None
         return RawPosting(
-            source="smartrecruiters",
+            source=f"smartrecruiters_{company_id}",  # per-company tag -> per-company stale guard
             source_native_id=str(item.get("id")),
             title=str(item.get("name", "")),
             company=str((item.get("company") or {}).get("name") or company_id),

@@ -55,6 +55,11 @@ def test_greenhouse_partial_success(
         res = GreenhouseSource(tokens=["acme", "bad"]).fetch(cfg, now_clock)
     assert res.succeeded is True  # one company OK is enough (coverage rule)
     assert len(res.jobs) == 2  # both postings from acme; bad contributed none
+    # per-company isolation: sub_results + source tags let the stale guard spare 'bad'
+    subs = {name: (ok, n) for name, ok, n in res.sub_results}
+    assert subs["greenhouse_acme"] == (True, 2)
+    assert subs["greenhouse_bad"] == (False, 0)
+    assert res.jobs[0].source == "greenhouse_acme"
 
 
 def test_greenhouse_all_fail_is_failed(now_clock: FixedClock, cfg: Config) -> None:

@@ -342,6 +342,20 @@ def test_recent_runs_newest_first(conn: sqlite3.Connection, clock: FixedClock) -
     assert [r["run_id"] for r in rows] == sorted(ids, reverse=True)[:2]
 
 
+def test_reconcile_orphan_runs(conn: sqlite3.Connection, clock: FixedClock) -> None:
+    runs_repo.start_run(conn, "manual", clock)  # 'running', never finished (crash)
+    r2 = runs_repo.start_run(conn, "manual", clock)  # a second orphan
+    assert runs_repo.reconcile_orphan_runs(conn, clock) == 2
+    assert runs_repo.current_run(conn) is None  # wedge cleared
+    row = conn.execute(
+        "SELECT status, finished_at, error FROM runs WHERE run_id=?", (r2,)
+    ).fetchone()
+    assert row["status"] == "failed"
+    assert row["finished_at"] is not None
+    assert "abandoned" in row["error"]
+    assert runs_repo.reconcile_orphan_runs(conn, clock) == 0  # idempotent
+
+
 def test_last_successful_run_is_strict(conn: sqlite3.Connection, clock: FixedClock) -> None:
     r1 = runs_repo.start_run(conn, "manual", clock)
     runs_repo.finish_run(conn, r1, "success", clock=clock)

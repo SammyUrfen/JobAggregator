@@ -33,8 +33,24 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _ensure_initialized(db_path: str) -> None:
+    """Idempotently create the schema + seed config so `serve` works on a fresh machine (no
+    separate `initdb` needed). CREATE IF NOT EXISTS + seed-only-if-absent make this a no-op on
+    an already-initialized DB."""
+    from job_aggregator.config.store import seed_from_yaml
+    from job_aggregator.storage.db import connect, init_db
+
+    conn = connect(db_path)
+    try:
+        init_db(conn)
+        seed_from_yaml(conn)
+    finally:
+        conn.close()
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    _ensure_initialized(app.state.db_path)  # first-run friendliness: no bare 500 before initdb
     # JOBAGG_DISABLE_SCHEDULER lets an OS-timer deployment (Phase 9) run without the in-process one.
     manage = not os.environ.get("JOBAGG_DISABLE_SCHEDULER")
     if manage:

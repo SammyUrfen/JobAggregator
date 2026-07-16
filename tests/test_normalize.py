@@ -54,6 +54,34 @@ def test_parse_date_garbage_is_none(garbage: object) -> None:
     assert parse_date(garbage) is None
 
 
+def test_parse_date_date_object() -> None:
+    from datetime import date
+
+    assert parse_date(date(2026, 6, 1)) == datetime(2026, 6, 1, tzinfo=UTC)
+
+
+def test_parse_date_absurd_epoch_is_none() -> None:
+    assert parse_date(10**20) is None  # out-of-range timestamp -> None, never raises
+
+
+def test_build_job_coerces_numeric_and_bool_fields(cfg: Config) -> None:
+    job = build_job(
+        cfg,
+        source="x",
+        company="Acme",
+        title="Backend Engineer Intern",
+        url="https://x/1",
+        match_score=7,  # int -> float
+        is_remote=True,
+        salary_min=600000.0,  # float -> int, then INR/year -> INR/month
+        salary_currency="INR",
+        salary_period="year",
+    )
+    assert job.match_score == 7.0
+    assert job.is_remote is True
+    assert job.salary_min == 50000
+
+
 def test_build_job_smoke(cfg: Config) -> None:
     job = build_job(
         cfg,

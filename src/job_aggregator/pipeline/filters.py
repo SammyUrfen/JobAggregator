@@ -49,11 +49,14 @@ def _location_ok(job: Job, cfg: Config) -> bool:
     jl = norm_location(job.location)
     if not jl:  # unknown location -> don't hard-drop
         return True
+    job_tokens = set(jl.split())
     for loc in cfg.locations:
         nl = norm_location(loc)
         if not nl or nl == "remote":
             continue
-        if nl in jl or jl in nl or (set(nl.split()) & set(jl.split())):
+        # Whole-token overlap only — a raw substring match wrongly admits "Indiana, USA" for a
+        # configured "India" (norm 'india' is a substring of 'indiana').
+        if set(nl.split()) & job_tokens:
             return True
     return False
 
