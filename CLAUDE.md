@@ -28,9 +28,9 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   `dashboard/static/css/theme.css`.
 
 ## Current status
-**Phases 0–7 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
-all clean; `pytest` 180 passed / 2 skipped; **live cycle** writes+dedups jobs AND emits a valid
-Atom feed.xml). Done:
+**Phases 0–8 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
+all clean; `pytest` 211 passed / 1 skipped; **live cycle** writes+dedups jobs, emits a valid
+Atom feed.xml, and the **dashboard serves** at all routes). Done:
 - **Phase 0** — foundation: package skeleton, `errors`/`clock`/`paths`/`logging`, tooling gate.
 - **Phase 1** — storage core: `storage/{db,jobs_repo,runs_repo,schema.sql}`, `models/job.py`,
   `config/{schema,store}` (idempotent upsert w/ user-flag preservation; run bookkeeping).
@@ -54,9 +54,16 @@ Atom feed.xml). Done:
   Telegram HTML digest (httpx), email digest (stdlib smtplib), atomic Atom/RSS snapshot (Jinja2).
   Notifiers log+swallow (never fail a run); missing creds → safe dry-run. Runner **step-8 finalized**:
   NEW_ONLY channels get `jobs_new_in_run`, RSS gets `recent_active_jobs` (both from the DB).
+- **Phase 8** — dashboard: `dashboard/{app,deps,routes_jobs,routes_config,routes_runs}.py` +
+  Jinja templates + Blood Orange theme (theme.css tokens, app.css, ~150-line vanilla app.js).
+  `create_app(*, db_path, clock, scheduler)` (zero-arg works; lifespan owns the scheduler);
+  GET / (filter/sort/paginate, whitelisted ORDER BY), row actions → swap `<tr>`, GET/PUT config
+  (merge-onto-current + `Config.model_validate`, 422 dotted errors), runs history + Run-now +
+  `/api/runs/current` poll; error hierarchy → JSON envelope. Verified live via curl (Playwright
+  MCP not connected this session).
 
-**Remaining: Phases 8–9** — stubs still raise `NotImplementedError("Phase N: ...")`. Build in
-order per PLAN.md Part II. Next: Phase 8 (FastAPI dashboard + Blood Orange theme).
+**Remaining: Phase 9** — stubs still `NotImplementedError`/pending. Build per PLAN.md Part II.
+Next: Phase 9 (polish, coverage gate ≥85%, README/docs/TROUBLESHOOTING, optional hardening).
 
 ## Conventions (the user's — honor them)
 - **ruff** (lint+format) + **mypy** strict + **pytest** must be green before "done".
