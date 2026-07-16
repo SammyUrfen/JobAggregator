@@ -27,7 +27,6 @@ from job_aggregator.storage import jobs_repo, runs_repo
 if TYPE_CHECKING:
     from job_aggregator.clock import Clock
     from job_aggregator.models.job import Job
-    from job_aggregator.notify.base import Notifier
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +89,10 @@ def run_cycle(
         results = _fetch_all(resolved, cfg, clock)
         succeeded, n_ok, n_err, source_errors = _record_source_runs(conn, run_id, results)
         conn.commit()
-        new_jobs, n_new, n_updated, n_filtered = _filter_and_upsert(
-            conn, run_id, results, cfg, clock
-        )
+        n_new, n_updated, n_filtered = _filter_and_upsert(conn, run_id, results, cfg, clock)
         conn.commit()
         n_expired = expire_stale(conn, run_id, succeeded, cfg, clock)
-        _notify(conn, run_id, cfg, clock, new_jobs, notifiers)  # step 8 (Phase 7 finalizes)
+        _notify(conn, run_id, cfg, clock, notifiers)  # step 8
         status = _run_status(n_ok, n_err)
         runs_repo.finish_run(
             conn,
@@ -207,8 +204,7 @@ def _filter_and_upsert(
     results: list[SourceResult],
     cfg: Config,
     clock: Clock,
-) -> tuple[list[Job], int, int, int]:
-    new_jobs: list[Job] = []
+) -> tuple[int, int, int]:
     n_new = n_updated = n_filtered = 0
     for res in results:
         if not res.succeeded:
@@ -222,10 +218,9 @@ def _filter_and_upsert(
             job.match_score = verdict.score
             if jobs_repo.upsert_job(conn, job, run_id, clock) == "new":
                 n_new += 1
-                new_jobs.append(job)
             else:
                 n_updated += 1
-    return new_jobs, n_new, n_updated, n_filtered
+    return n_new, n_updated, n_filtered
 
 
 def _notify(
@@ -233,23 +228,27 @@ def _notify(
     run_id: int,
     cfg: Config,
     clock: Clock,
-    new_jobs: list[Job],
     notifiers: Sequence[SupportsNotifyNew] | None,
 ) -> None:
-    """PROVISIONAL step 8 — Phase 7 replaces this with feed-scope routing. Until then: deliver
-    the in-memory new_jobs to each notifier, best-effort. A notifier failure NEVER fails the run."""
-    resolved: Sequence[SupportsNotifyNew]
-    if notifiers is None:
-        if not new_jobs:
-            return
-        resolved = _build_notifiers(cfg, clock)
-    else:
-        resolved = notifiers
+    """Step 8 (final): hand each notifier its feed-scoped payload, straight from the DB.
+
+    NEW_ONLY channels get this run's new jobs (`jobs_new_in_run` — never a stuck-'new' from a
+    failed source); RECENT_ACTIVE (RSS) gets the recent-active snapshot. A notifier failure
+    NEVER fails the run. Notify does not mutate run counts.
+    """
+    from job_aggregator.notify.base import FeedScope, build_notifiers
+
+    new_jobs = jobs_repo.jobs_new_in_run(conn, run_id)
+    recent = jobs_repo.recent_active_jobs(conn, cfg.notify.rss.max_items)
+    resolved = list(notifiers) if notifiers is not None else build_notifiers(cfg, clock)
     for notifier in resolved:
+        scope = getattr(notifier, "feed_scope", FeedScope.NEW_ONLY)
+        payload = recent if scope is FeedScope.RECENT_ACTIVE else new_jobs
         try:
-            notifier.notify_new(new_jobs, cfg)
+            notifier.notify_new(payload, cfg)
         except Exception:
-            logger.exception("notifier %s failed", type(notifier).__name__)
+            name = getattr(notifier, "name", type(notifier).__name__)
+            logger.exception("notifier %s raised (ignored)", name)
 
 
 def _run_status(n_ok: int, n_err: int) -> str:
@@ -266,9 +265,3 @@ def _build_sources(cfg: Config) -> list[Source]:
     from job_aggregator.sources.registry import build_enabled_sources
 
     return build_enabled_sources(cfg)
-
-
-def _build_notifiers(cfg: Config, clock: Clock) -> list[Notifier]:
-    from job_aggregator.notify.base import build_notifiers  # lazy: Phase 7
-
-    return build_notifiers(cfg, clock)

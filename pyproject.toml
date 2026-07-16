@@ -73,6 +73,8 @@ ignore = [
 "src/job_aggregator/pipeline/runner.py" = ["PLC0415"]
 # scheduler defers apscheduler + config/runner/repo imports into method bodies (see module docs).
 "src/job_aggregator/scheduler/scheduler.py" = ["PLC0415"]
+# notify.build_notifiers imports channel modules lazily to avoid a base<->channel import cycle.
+"src/job_aggregator/notify/base.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"
