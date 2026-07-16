@@ -28,8 +28,9 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   `dashboard/static/css/theme.css`.
 
 ## Current status
-**Phases 0–6 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
-all clean; `pytest` 156 passed / 3 skipped; one **live end-to-end cycle** writes+dedups jobs). Done:
+**Phases 0–7 implemented + verified** (full gate green: `ruff check`/`ruff format`/`mypy src`
+all clean; `pytest` 180 passed / 2 skipped; **live cycle** writes+dedups jobs AND emits a valid
+Atom feed.xml). Done:
 - **Phase 0** — foundation: package skeleton, `errors`/`clock`/`paths`/`logging`, tooling gate.
 - **Phase 1** — storage core: `storage/{db,jobs_repo,runs_repo,schema.sql}`, `models/job.py`,
   `config/{schema,store}` (idempotent upsert w/ user-flag preservation; run bookkeeping).
@@ -48,11 +49,14 @@ all clean; `pytest` 156 passed / 3 skipped; one **live end-to-end cycle** writes
 - **Phase 6** — self-driving: `scheduler/scheduler.py` (`JobScheduler`: APScheduler `BackgroundScheduler`
   daily cron + startup catch-up on last-**success** + non-blocking lock funnel) and finalized `cli.py`
   (`initdb`/`run`/`serve`/`show-config`; shared-parent `--db`/`--log-level` after the subcommand;
-  `.env` load post-parse; error-hierarchy → `{code,message}` envelope). `notify.base.build_notifiers`
-  is a no-op `[]` until Phase 7 (was raising and crashing `run` once new jobs appeared).
+  `.env` load post-parse; error-hierarchy → `{code,message}` envelope).
+- **Phase 7** — notifications: `notify/{base,telegram,email,rss}.py`. `FeedScope` routing;
+  Telegram HTML digest (httpx), email digest (stdlib smtplib), atomic Atom/RSS snapshot (Jinja2).
+  Notifiers log+swallow (never fail a run); missing creds → safe dry-run. Runner **step-8 finalized**:
+  NEW_ONLY channels get `jobs_new_in_run`, RSS gets `recent_active_jobs` (both from the DB).
 
-**Remaining: Phases 7–9** — stubs still raise `NotImplementedError("Phase N: ...")`. Build in
-order per PLAN.md Part II. Next: Phase 7 (notifications: telegram/email/rss + runner step-8 finalize).
+**Remaining: Phases 8–9** — stubs still raise `NotImplementedError("Phase N: ...")`. Build in
+order per PLAN.md Part II. Next: Phase 8 (FastAPI dashboard + Blood Orange theme).
 
 ## Conventions (the user's — honor them)
 - **ruff** (lint+format) + **mypy** strict + **pytest** must be green before "done".
