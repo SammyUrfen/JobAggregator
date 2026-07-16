@@ -31,7 +31,7 @@ def test_hard_drop_no_level(make_job: JobFactory, cfg: Config) -> None:
 
 
 def test_hard_drop_no_role(make_job: JobFactory, cfg: Config) -> None:
-    job = make_job(title="Marketing Intern", description="run social campaigns")
+    job = make_job(title="Graphic Designer Intern", description="run social campaigns")
     verdict = score_and_filter(job, cfg)
     assert verdict.keep is False
     assert verdict.reasons == ["no_role_match"]
@@ -80,3 +80,48 @@ def test_drop_when_on_missing_is_drop(make_job: JobFactory, cfg: Config) -> None
     verdict = score_and_filter(job, drop_cfg)
     assert verdict.keep is False
     assert verdict.reasons == ["salary_missing"]
+
+
+def test_hard_drop_excluded_off_stack_domain(make_job: JobFactory, cfg: Config) -> None:
+    # off-stack domain terms seeded into `exclude` (title screen) drop before the role gate
+    job = make_job(title="Embedded Software Engineer Intern", description="firmware in C")
+    verdict = score_and_filter(job, cfg)
+    assert verdict.keep is False
+    assert verdict.reasons == ["excluded:embedded"]
+
+
+def test_hard_drop_no_relevant_skill(make_job: JobFactory, cfg: Config) -> None:
+    # A generic role token matches, but no must_have stack term is present -> dropped as off-domain.
+    relaxed = cfg.model_copy(deep=True)
+    relaxed.keywords.roles = [*relaxed.keywords.roles, "software engineer"]
+    job = make_job(title="Software Engineer Intern", description="join our friendly team")
+    verdict = score_and_filter(job, relaxed)
+    assert verdict.keep is False
+    assert verdict.reasons == ["no_relevant_skill"]
+
+
+def test_keep_with_must_have_skill(make_job: JobFactory, cfg: Config) -> None:
+    relaxed = cfg.model_copy(deep=True)
+    relaxed.keywords.roles = [*relaxed.keywords.roles, "software engineer"]
+    job = make_job(
+        title="Software Engineer Intern",
+        description="work on our Python backend",  # 'python'/'backend' satisfy must_have
+        is_remote=True,
+        salary_bucket=SalaryBucket.PASS,
+    )
+    verdict = score_and_filter(job, relaxed)
+    assert verdict.keep is True
+
+
+def test_empty_must_have_disables_gate(make_job: JobFactory, cfg: Config) -> None:
+    relaxed = cfg.model_copy(deep=True)
+    relaxed.keywords.roles = [*relaxed.keywords.roles, "software engineer"]
+    relaxed.keywords.must_have = []  # empty -> legacy behaviour: a role match alone is enough
+    job = make_job(
+        title="Software Engineer Intern",
+        description="join our friendly team",
+        is_remote=True,
+        salary_bucket=SalaryBucket.PASS,
+    )
+    verdict = score_and_filter(job, relaxed)
+    assert verdict.keep is True

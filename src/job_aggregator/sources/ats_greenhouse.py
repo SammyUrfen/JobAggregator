@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +54,8 @@ class GreenhouseSource(Source):
             url=str(item.get("absolute_url", "")),
             location=location or None,
             is_remote=True if "remote" in str(location).lower() else None,
-            description=item.get("content"),
+            # Greenhouse returns the body as HTML-entity-encoded text (&lt;p&gt;...); unescape once
+            # so the dashboard renderer sees real tags, not literal "<p>".
+            description=html.unescape(str(item["content"])) if item.get("content") else None,
             posted_at=parse_iso(item.get("updated_at")) or parse_iso(item.get("first_published")),
         )

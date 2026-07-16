@@ -29,13 +29,17 @@ MAX_RETRY_AFTER_S = 30.0  # never obey an absurd Retry-After
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
-def make_client(*, timeout: float | None = None) -> httpx.Client:
-    """Build a configured sync httpx.Client (browser UA, JSON Accept, redirects, timeouts)."""
+def make_client(*, timeout: float | None = None, user_agent: str | None = None) -> httpx.Client:
+    """Build a configured sync httpx.Client (browser UA, JSON Accept, redirects, timeouts).
+
+    `user_agent` overrides the default browser UA for a single source — Himalayas' Cloudflare
+    currently 403-challenges the realistic Chrome UA ("Just a moment...") but passes a bare UA.
+    """
     t = httpx.Timeout(timeout or DEFAULT_TIMEOUT_S, connect=DEFAULT_CONNECT_S)
     return httpx.Client(
         timeout=t,
         follow_redirects=True,
-        headers={"User-Agent": BROWSER_UA, "Accept": "application/json"},
+        headers={"User-Agent": user_agent or BROWSER_UA, "Accept": "application/json"},
     )
 
 

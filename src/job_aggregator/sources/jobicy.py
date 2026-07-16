@@ -65,6 +65,7 @@ class JobicySource(Source):
             url=str(item.get("url", "")),
             location=item.get("jobGeo") or "Remote",
             is_remote=True,
+            description=item.get("jobDescription"),
             salary_min=pos_int_or_none(item.get("salaryMin")),
             salary_max=pos_int_or_none(item.get("salaryMax")),
             salary_currency=item.get("salaryCurrency"),

@@ -146,7 +146,7 @@ def test_jooble_posts_json_body(load_fixture: Loader, now_clock: FixedClock, cfg
                 httpx.Response(200, json={"jobs": []}),  # page 2 empty -> stop paginating
             ]
         )
-        res = JoobleSource(api_key="KEY", keywords="backend", location="India").fetch(
+        res = JoobleSource(api_key="KEY", queries=["backend"], location="India").fetch(
             cfg, now_clock
         )
     assert res.succeeded is True
@@ -169,6 +169,8 @@ def test_unstop_drops_stale_keeps_recent(
         )
     assert res.n_fetched == 1  # 2022 posting dropped by recency
     job = res.jobs[0]
+    # seo_url (absolute) is preferred over the scheme-less relative public_url that used to 404
+    assert job.url == "https://unstop.com/internships/backend-development-intern-acme-30111"
     assert job.salary_currency == "INR"
     assert job.salary_period == "month"
 
@@ -310,6 +312,8 @@ def _adzuna_page(n: int, start: int = 0) -> dict[str, Any]:
 
 
 def test_adzuna_paginates_and_query_targets(now_clock: FixedClock, cfg: Config) -> None:
+    one = cfg.model_copy(deep=True)
+    one.keywords.roles = ["backend engineer"]  # single role -> exactly one `what` query
     with respx.mock:
         route = respx.route(method="GET", host="api.adzuna.com").mock(
             side_effect=[
@@ -317,24 +321,27 @@ def test_adzuna_paginates_and_query_targets(now_clock: FixedClock, cfg: Config) 
                 httpx.Response(200, json=_adzuna_page(10, start=50)),  # short -> stop
             ]
         )
-        res = AdzunaSource("in", "A", "K", max_pages=5).fetch(cfg, now_clock)
+        res = AdzunaSource("in", "A", "K", max_pages=5).fetch(one, now_clock)
     assert route.calls.call_count == 2
     assert res.n_fetched == 60
     assert route.calls[0].request.url.path.endswith("/search/1")
     assert route.calls[1].request.url.path.endswith("/search/2")
-    # role keywords became a what_or query (targeted, not generic recent)
-    assert "backend" in route.calls[0].request.url.params["what_or"]
+    params = route.calls[0].request.url.params
+    assert params["what"] == "backend engineer"  # per-role AND phrase, not a broad word-OR
+    assert params["category"] == "it-jobs"  # constrained to software/IT at the source
 
 
-def test_adzuna_no_roles_omits_query(now_clock: FixedClock) -> None:
-    bare = Config()  # no roles -> generic recent, no what_or
+def test_adzuna_no_roles_uses_fallback_query(now_clock: FixedClock) -> None:
+    bare = Config()  # no roles -> a generic software fallback query, still IT-only
     bare.keywords.roles = []
     with respx.mock:
         route = respx.route(method="GET", host="api.adzuna.com").mock(
             return_value=httpx.Response(200, json=_adzuna_page(3))  # short -> one call
         )
         AdzunaSource("in", "A", "K").fetch(bare, now_clock)
-    assert "what_or" not in route.calls[0].request.url.params
+    params = route.calls[0].request.url.params
+    assert params["what"] == "software engineer"  # fallback when no roles configured
+    assert params["category"] == "it-jobs"
 
 
 def test_jooble_paginates_until_empty(now_clock: FixedClock, cfg: Config) -> None:
@@ -349,7 +356,7 @@ def test_jooble_paginates_until_empty(now_clock: FixedClock, cfg: Config) -> Non
                 httpx.Response(200, json={"jobs": []}),  # stop
             ]
         )
-        res = JoobleSource("K", "backend", "India", max_pages=10).fetch(cfg, now_clock)
+        res = JoobleSource("K", ["backend"], "India", max_pages=10).fetch(cfg, now_clock)
     assert route.calls.call_count == 3
     assert res.n_fetched == 2
     assert json.loads(route.calls[1].request.content)["page"] == 2  # page incremented

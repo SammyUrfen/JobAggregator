@@ -233,9 +233,24 @@ body.modal-open { overflow: hidden; } /* freeze the page behind the modal */
   padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4);
   max-height: 40vh; overflow-y: auto;
 }
-.jd-desc-body { white-space: pre-wrap; word-wrap: break-word; margin: 0; font-size: 13px; }
+.jd-desc-body { word-wrap: break-word; margin: 0; font-size: 13px; line-height: 1.5; }
+.jd-desc-body p { margin: 0 0 var(--sp-2); }
+.jd-desc-body ul, .jd-desc-body ol { margin: 0 0 var(--sp-2) var(--sp-4); padding: 0; }
+.jd-desc-body li { margin: 2px 0; }
+.jd-desc-body h3, .jd-desc-body h4 { margin: var(--sp-2) 0 var(--sp-1); font-size: 13px; }
+.jd-desc-body a { color: var(--accent); }
+.jd-desc-body code, .jd-desc-body pre { font-family: var(--font-mono, monospace); font-size: 12px; }
+.jd-desc-body pre { white-space: pre-wrap; }
 .jd-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .jd-primary { display: inline-flex; gap: var(--sp-2); }
 .jd-secondary { display: inline-flex; gap: 4px; margin-left: auto; }
 .apply-btn { background: var(--accent); color: var(--accent-contrast); }
 .jd-note { flex-basis: 100%; font-size: 11px; margin: var(--sp-1) 0 0; }
+.jd-tailor { flex-basis: 100%; }
+.tailor-result { background: var(--surface-2); border-radius: var(--radius-inner);
+  padding: var(--sp-3); margin-top: var(--sp-2); font-size: 13px; }
+.tailor-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);
+  margin-bottom: var(--sp-2); }
+.tailor-projects ul { margin: var(--sp-1) 0 var(--sp-2) var(--sp-4); padding: 0; }
+.tailor-flags { margin: 0 0 var(--sp-2) var(--sp-4); padding: 0; }
+.tailor-flags .warn { color: var(--warn, #b06f00); }

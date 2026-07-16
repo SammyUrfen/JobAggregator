@@ -39,7 +39,7 @@ IMMEDIATE_JOB_ID = "immediate_cycle"
 # Generous misfire grace: a laptop asleep at run_hour still fires on wake within the window.
 MISFIRE_GRACE_SECONDS = 3600
 MAX_INSTANCES = 1
-# Catch up if the last SUCCESS is older than this (daily cadence + slack).
+# Catch up if the last COMPLETED run (success OR partial) is older than this threshold.
 CATCH_UP_THRESHOLD = timedelta(hours=24)
 
 
@@ -99,7 +99,12 @@ class JobScheduler:
         return result
 
     def catch_up_on_startup(self) -> None:
-        """Submit an immediate run if no SUCCESS in the last ~24h (the sleeping-laptop reality)."""
+        """Submit an immediate run if the last COMPLETED run (success or partial) is older than ~24h
+        (the sleeping-laptop reality). Gating on 'completed' rather than strict success means a
+        permanently-blocked source (himalayas 403 / naukri recaptcha) — which keeps every run
+        'partial' — no longer forces a full re-run on every `serve` boot; the daily cron still
+        retries it. A 'failed' run (nothing fetched) is excluded, so it still forces catch-up.
+        """
         from job_aggregator.config.store import load_effective_config
         from job_aggregator.storage import runs_repo
 
@@ -108,22 +113,22 @@ class JobScheduler:
             if not load_effective_config(conn).schedule.catch_up_on_startup:
                 log.info("startup catch-up disabled; skipping")
                 return
-            last_row = runs_repo.last_successful_run(conn)
+            last_row = runs_repo.last_completed_run(conn)
         finally:
             conn.close()
         last = _run_finished_at(last_row)
         if self._should_catch_up(last, self._clock.now(), CATCH_UP_THRESHOLD):
             self._submit_async(TRIGGER_CATCHUP)
         else:
-            log.info("recent success at %s; catch-up not needed", last)
+            log.info("recent run completed at %s; catch-up not needed", last)
 
     @staticmethod
     def _should_catch_up(
-        last_success: datetime | None, now: datetime, threshold: timedelta
+        last_completed: datetime | None, now: datetime, threshold: timedelta
     ) -> bool:
-        if last_success is None:  # never ran a successful cycle
+        if last_completed is None:  # never made progress (no run, or last cycle fetched nothing)
             return True
-        return (now - last_success) >= threshold
+        return (now - last_completed) >= threshold
 
     def trigger_now(self, trigger: str = TRIGGER_MANUAL) -> int | None:
         """Run synchronously now; returns the run_id, or None if a run is already in progress."""

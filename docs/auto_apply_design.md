@@ -16,7 +16,29 @@
 >
 > **Track B (card UI + detail modal): DONE.** `.jobs-grid` of clickable `.job-card`s → `#job-modal`
 > from `GET /api/jobs/{uid}/detail`; original-posting link + Apply button + safe HTML→text
-> description. Fixed `serve --db` (was silently ignored). 267 tests green, 89% cov; live-verified.
+> description. Fixed `serve --db` (was silently ignored). Live-verified.
+>
+> **Track C (profile + résumé tailoring engine): DONE.** `profile/` + `apply/backends.py` (two
+> backends) + `resume/{tailor,render}.py` (selection + merge-exclusion guard + preservation → LaTeX
+> → PDF). Live-verified: real profile → tailored → 108 KB PDF via pdflatex.
+>
+> **Coverage pass: DONE.** `paginate_until_empty` (loop-until-empty + `max_pages` cap) on Adzuna
+> (+query targeting), Jooble, Unstop. Live: raw fetch ~246 → ~1211.
+>
+> **Track D (browser apply agent): NOT STARTED (build plan below).** Needs an MCP/Playwright-capable
+> session — see **"Track D — build plan (next session)"**.
+>
+> **State @ 2026-07-16:** 304 tests green, 89.8% cov, `ruff`/`mypy` clean. All of the above is
+> **committed** (`219bc9b`, `294dbad`); only this doc + `CLAUDE.md` carry later uncommitted edits.
+> `profile.yaml` is git-ignored (personal).
+>
+> ### 👉 Handoff — start here next session
+> 1. `git status` — Tracks B/C + the coverage pass are already committed; only doc edits remain.
+> 2. Verify `profile.yaml` facts are correct (it's your ground truth; git-ignored).
+> 3. **Quick win, no browser needed:** wire the working résumé engine to a user surface — a
+>    `tailor` CLI subcommand and/or a `POST /api/jobs/{uid}/tailor` route + a "Tailor résumé"
+>    button in the detail modal. This makes Track C usable today and is fully testable.
+> 4. Then build **Track D** per the plan at the bottom of this doc (needs a real browser).
 
 ## Problem
 
@@ -71,16 +93,18 @@ cycle finishes.
 sources/ (unchanged: fetch → dedup → filter → upsert)
         │
         ▼
-profile/           # your ground-truth: projects, skills, education, links, ambitions (YAML/DB)
-resume/            # LaTeX template + tailoring pipeline (JD-extract → fact-extract → render → PDF)
-  ├── tailor.py    #   3-step LLM pipeline + merge-exclusion + preservation/alignment scoring
-  └── render.py    #   fill template → pdflatex/tectonic → PDF (+ store artifact)
+profile/           # ✅ DONE — ground truth: schema.py (Pydantic) + store.py (validated YAML loader)
+resume/            # ✅ DONE — templates/base_resume.tex, tailor.py, render.py
+  ├── tailor.py    #   ✅ JD-extract → select → guarded LLM rewrite (merge-exclusion) → preservation
+  └── render.py    #   ✅ fill template (escaped) → .tex → compile_pdf (tectonic/pdflatex seam)
 apply/             # the agent layer (opt-in, off by default)
-  ├── session.py   #   encrypted Playwright storageState per domain; headful login flow
-  ├── agent.py     #   browser-use driver: read form → map fields from profile+resume → PRE-FILL
-  └── ats/*        #   per-ATS field maps where deterministic (Greenhouse/Lever) to avoid LLM drift
-dashboard/         # cards + detail modal + "Apply" (opens headful browser, agent fills, you submit)
-notify/telegram    # already exists; add a run-summary digest with the localhost link
+  ├── backends.py  #   ✅ DONE — AgentBackend + OpenAICompatible + CodingAgent + build_backend
+  ├── session.py   #   ⬜ Track D — encrypted Playwright storageState per domain (Fernet)
+  ├── driver.py    #   ⬜ Track D — BrowserDriver Protocol + BrowserUseDriver (headful, no submit)
+  ├── agent.py     #   ⬜ Track D — orchestrator: résumé + field-map → driver.fill_form → review
+  └── ats/*        #   ⬜ Track D — per-ATS deterministic field maps (Greenhouse/Lever/…)
+dashboard/         # ✅ cards + detail modal;  ⬜ Track D: wire Apply → agent + "Tailor" preview
+notify/telegram    # ✅ DONE — run-summary digest with the localhost link
 ```
 
 **Apply flow (per job, human-triggered):** click **Apply** on a card → backend picks/generates the
@@ -145,14 +169,71 @@ form in the real browser and click **Submit** yourself. Nothing is sent without 
 - **Form-fill reliability** — deterministic field maps for known ATS; LLM only for the unknown; always
   human-review before submit.
 
-## Still needed from you (for Phase C)
+## Track D — build plan (next session)
 
-- The **LaTeX résumé template** (the merge-exclusion pipeline is built around its section structure).
-- A first draft of the **profile**: projects, skills, education, links, ambitions. I'll scaffold a
-  `profile.yaml` you can fill in — this is the ground-truth the tailoring may re-order/emphasize but
-  never invent beyond.
-- For the OpenAI-compatible backend: which endpoint + model (Groq / Gemini / local). The coding-agent
-  backend (Claude Code) needs no key.
+Everything below is unbuilt. It needs a session with a **real browser** (headful Chromium) and a
+Playwright/MCP-capable environment — a background/CI run can't validate it. Ships **opt-in**
+(`apply.enabled`, default false) with the non-browser logic unit-tested via a fake driver.
+
+### Step 0 — intermediate win first (no browser)
+The résumé engine (`resume/tailor.py` + `render.py`) already works but has **no user surface**.
+Wire it before touching the browser — fully testable today:
+- **CLI:** a `tailor` subcommand — `python -m job_aggregator tailor <job_uid> [--out resume.pdf]`
+  → load profile → `tailor_resume(profile, job.description, backend=build_backend(cfg.resume))`
+  → `render_latex` → `compile_pdf`. Print the preservation score + flags.
+- **Dashboard:** `POST /api/jobs/{uid}/tailor` returning the tailored preview (selected projects,
+  flags, preservation) + a **"Tailor résumé"** button in the detail modal (`job_detail.html`). The
+  PDF download link points at the compiled artifact under `data/resumes/<uid>.pdf`.
+- Keep the backend call behind the existing `AgentBackend` seam so tests inject a fake.
+
+### Step 1 — optional dependencies
+Add a `[project.optional-dependencies] apply = ["browser-use", "playwright", "cryptography"]`
+extra so the core tool stays lean. Lazy-import `browser_use`/`playwright` behind the driver seam
+(mirror `jobspy_source.py`'s lazy import) so `pytest`/`mypy` never require them. Document
+`pip install -e '.[apply]' && playwright install chromium`.
+
+### Step 2 — encrypted session store  (`apply/session.py`)
+- Persist Playwright `storageState` (cookies + localStorage) **per domain**, encrypted at rest with
+  **Fernet**. Key from env `JOBAGG_SESSION_KEY` (or derive from a passphrase via `scrypt`); never
+  commit; store blobs under `data/sessions/<domain>.enc` (git-ignored — add to `.gitignore`).
+- API: `load_state(domain) -> dict | None`, `save_state(domain, state) -> None`, `has_state(domain)`.
+- Caveats to encode: `sessionStorage` is NOT persisted; server-side token expiry still forces
+  periodic re-login (surface a clear "session expired, please log in again" path).
+- **Testable now:** encrypt→decrypt round-trip, wrong-key fails, missing file → None.
+
+### Step 3 — browser driver behind a seam  (`apply/driver.py`)
+- Define `BrowserDriver` Protocol: `fill_form(url, fields, *, storage_state, headful=True) -> FillResult`
+  where `FillResult` = {filled: dict, unfilled: list, screenshot_path, needs_login: bool}.
+- `BrowserUseDriver` implements it via browser-use (headful; loads/saves storageState; **stops
+  before Submit** — never clicks it). A `FakeDriver` in tests records calls and returns canned
+  results. The orchestrator only ever talks to the Protocol.
+
+### Step 4 — apply orchestrator  (`apply/agent.py`)
+Per-job, human-triggered flow (matches the "Apply flow" section above):
+1. Resolve/generate the tailored résumé (Step 0 engine) → PDF path.
+2. Build the field map: `profile` + tailored résumé → `{name,email,phone,linkedin,github,resume_path,
+   cover_note,…}`. For known ATS use **deterministic field maps** (`apply/ats/{greenhouse,lever,
+   ashby,smartrecruiters}.py`); fall back to the LLM/driver for unknown forms.
+3. `has_state(domain)?` → load it; else headful login, then `save_state`.
+4. `driver.fill_form(...)` → **stop at Submit**. Return the fill result + screenshot to the UI.
+5. **User reviews in the real browser and clicks Submit.** Nothing is auto-submitted
+   (`apply.auto_submit` stays false — enforced, not just default).
+- **Testable now:** the field-map builder + orchestration branching against `FakeDriver` +
+  fake backend; ATS field maps are pure functions.
+
+### Step 5 — dashboard wiring
+- `POST /api/jobs/{uid}/apply` (guarded by `apply.enabled`) → kicks off Step 4 → streams status.
+- Detail-modal **Apply** button: today it opens the posting + marks applied; when `apply.enabled`,
+  it instead launches the agent and shows fill progress + the review prompt.
+- **ATS first** (Greenhouse/Lever/Ashby/SmartRecruiters — public, no-login, simplest). LinkedIn
+  Easy Apply / Naukri: keep behind an extra opt-in flag, headful-only, with the anti-bot/ToS
+  warning in the UI. Never auto-submit anywhere.
+
+### Step 6 — validate live (on your machine)
+`pip install -e '.[apply]'` → `playwright install chromium` → set `apply.enabled: true` → pick a
+Greenhouse/Lever posting → click **Apply** → watch it fill → **you** submit. Confirm session
+persistence (second apply on the same domain skips login). Report what the fake-driver tests can't:
+real form-fill reliability per ATS.
 
 ## Open research questions (unresolved by the deep-research pass — design around them)
 

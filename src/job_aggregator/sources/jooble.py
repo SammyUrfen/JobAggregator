@@ -21,31 +21,53 @@ if TYPE_CHECKING:
     from job_aggregator.config.schema import Config
 
 
+_PAGES_PER_QUERY = 3  # bound total requests: Jooble is queried once per role term (see registry).
+
+
 class JoobleSource(Source):
     name = "jooble"
 
-    def __init__(self, api_key: str, keywords: str, location: str, max_pages: int = 10) -> None:
+    def __init__(self, api_key: str, queries: list[str], location: str, max_pages: int = 5) -> None:
         self.api_key = api_key
-        self.keywords = keywords
+        # One Jooble query per role term. A comma-joined dump of every role returns 0 results;
+        # Jooble matches a single "backend engineer"-style phrase far better (verified live).
+        self.queries = queries
         self.location = location
         self.max_pages = max_pages
 
     def fetch(self, cfg: Config, clock: Clock) -> SourceResult:
         start = time.perf_counter()
         url = f"https://jooble.org/api/{self.api_key}"
+        pages = min(self.max_pages, _PAGES_PER_QUERY)
+        seen: set[str] = set()
+        items: list[Any] = []
         with make_client() as client:
+            for query in self.queries:
 
-            def fetch_page(page: int) -> list[Any]:
-                body = {"keywords": self.keywords, "location": self.location, "page": page}
-                data = get_json(client, url, method="POST", json_body=body)
-                jobs = data.get("jobs") if isinstance(data, dict) else None
-                return jobs if isinstance(jobs, list) else []
+                def fetch_page(page: int, query: str = query) -> list[Any]:
+                    body = {"keywords": query, "location": self.location, "page": page}
+                    data = get_json(client, url, method="POST", json_body=body)
+                    jobs = data.get("jobs") if isinstance(data, dict) else None
+                    return jobs if isinstance(jobs, list) else []
 
-            try:
-                # Jooble doesn't advertise a fixed page size, so stop on the first empty page.
-                items = paginate_until_empty(fetch_page, max_pages=self.max_pages)
-            except SourceError as exc:
-                return SourceResult.failed(self.name, str(exc), duration_ms=elapsed_ms(start))
+                try:
+                    # Jooble advertises no fixed page size -> stop on the first empty page.
+                    page_items = paginate_until_empty(fetch_page, max_pages=pages)
+                except SourceError as exc:
+                    # A first-page failure on the FIRST query is systemic (bad key/network) -> fail;
+                    # a later query failing keeps what earlier queries already returned.
+                    if not items:
+                        return SourceResult.failed(
+                            self.name, str(exc), duration_ms=elapsed_ms(start)
+                        )
+                    continue
+                for it in page_items:
+                    key = str(it.get("id") or it.get("link") or "")
+                    if key and key in seen:
+                        continue
+                    if key:
+                        seen.add(key)
+                    items.append(it)
         return build_result(self.name, items, self._map, duration_ms=elapsed_ms(start))
 
     def _map(self, item: Any) -> RawPosting:
@@ -53,7 +75,7 @@ class JoobleSource(Source):
             source="jooble",
             source_native_id=str(item.get("id")),
             title=str(item.get("title", "")),
-            company=str(item.get("company") or self.keywords),
+            company=str(item.get("company") or ""),
             url=str(item.get("link", "")),
             location=item.get("location"),
             is_remote=None,

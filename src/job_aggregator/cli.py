@@ -5,6 +5,7 @@ Subcommands (see PLAN.md Part II for full behaviour):
     run           execute ONE aggregation cycle now and print a summary   [Phase 5/6]
     serve         launch the FastAPI dashboard (which owns the daily scheduler)  [Phase 8]
     show-config   print the effective config currently stored in the DB
+    tailor        tailor the résumé to one job by uid -> a PDF (Track D Step 0)
 
 Design note: heavy third-party imports (fastapi, jobspy, apscheduler, pydantic) are done
 LAZILY inside each handler so that `python -m job_aggregator --help` works with only the
@@ -94,6 +95,54 @@ def cmd_show_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tailor(args: argparse.Namespace) -> int:
+    """Tailor the résumé to one job (by uid) and write a PDF (Track D Step 0; no browser)."""
+    from pathlib import Path
+
+    from job_aggregator.config.store import load_effective_config
+    from job_aggregator.errors import NotFoundError, RenderError
+    from job_aggregator.logging_setup import configure_logging
+    from job_aggregator.paths import resumes_dir
+    from job_aggregator.profile.store import load_profile
+    from job_aggregator.resume.render import compile_pdf, render_latex
+    from job_aggregator.resume.tailor import tailor_resume
+    from job_aggregator.storage.db import connect
+
+    configure_logging(args.log_level)
+    conn = connect(args.db)
+    row = conn.execute(
+        "SELECT title, description FROM jobs WHERE job_uid = ?", (args.uid,)
+    ).fetchone()
+    if row is None:
+        raise NotFoundError("job not found", details={"uid": args.uid})
+    cfg = load_effective_config(conn)  # ConfigError (friendly) if the DB isn't initialized
+    profile = load_profile()  # ConfigError (friendly) if profile.yaml is missing
+    # Title + description so even a null description still yields keywords from the title.
+    jd = f"{row['title']}\n{row['description'] or ''}"
+    backend = None
+    if args.llm:  # opt-in; imports httpx only on this path (keeps `import cli` stdlib-only)
+        from job_aggregator.apply.backends import build_backend
+
+        backend = build_backend(cfg.resume)
+    tailored = tailor_resume(profile, jd, backend=backend, config=cfg.resume)
+    print(f"projects: {', '.join(p.name for p in tailored.projects)}")
+    print(
+        f"preservation: {tailored.preservation:.0%}   keywords matched: {len(tailored.jd_keywords)}"
+    )
+    for flag in tailored.flags:
+        print(f"  ! {flag}")
+    out = Path(args.out) if args.out else resumes_dir() / f"{args.uid}.pdf"
+    tex = render_latex(profile, tailored)
+    try:
+        compile_pdf(tex, out)
+        print(f"wrote {out}")
+    except RenderError as exc:  # no engine / build failed -> keep the text preview + the .tex
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.with_suffix(".tex").write_text(tex, encoding="utf-8")
+        print(f"PDF not built ({exc.message}); wrote {out.with_suffix('.tex')} instead")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from job_aggregator.paths import default_db_path
 
@@ -125,6 +174,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_show = sub.add_parser("show-config", help="print the effective config", parents=[common])
     p_show.set_defaults(func=cmd_show_config)
+
+    p_tailor = sub.add_parser(
+        "tailor", help="tailor the résumé to one job by uid (Track D Step 0)", parents=[common]
+    )
+    p_tailor.add_argument("uid", help="job_uid to tailor for (from the dashboard/DB)")
+    p_tailor.add_argument(
+        "--llm",
+        action="store_true",
+        help="reword bullets via the configured backend (default: pure selection, no network)",
+    )
+    p_tailor.add_argument(
+        "--out", default=None, help="output PDF path (default data/resumes/<uid>.pdf)"
+    )
+    p_tailor.set_defaults(func=cmd_tailor)
 
     return parser
 

@@ -31,10 +31,13 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   agent). Read it before touching Track A–D work.
 
 ## Current status
-**v1 COMPLETE — Phases 0–9 implemented, audited, and verified.** Full gate green: `ruff check .`,
-`ruff format --check .`, `mypy src`, `pytest` (**250 passed** / 0 skipped; coverage **89% overall**,
-**94% correctness-core**, hard gate 85%). Verified live: a real cycle writes+dedups jobs and emits
-a valid Atom `feed.xml`; the dashboard serves all routes and auto-initializes on first run.
+**v1 COMPLETE (Phases 0–9) + auto-apply Tracks A–C done; Track D remaining.** Full gate green:
+`ruff check .`, `ruff format --check .`, `mypy src`, `pytest` (**304 passed** / 0 skipped; coverage
+**89.8%**, hard gate 85%). Verified live: a real cycle writes+dedups jobs and emits a valid Atom
+`feed.xml`; the dashboard serves all routes; résumé tailoring produces a real PDF.
+**Tracks A–C + the coverage pass are committed** (`219bc9b`, `294dbad`); only `CLAUDE.md` +
+`docs/auto_apply_design.md` carry later uncommitted doc edits. `profile.yaml` is git-ignored
+(personal). **Next: read `docs/auto_apply_design.md` → "Handoff — start here" + "Track D — build plan".**
 
 **Auto-apply extension (post-v1) — in progress.** Design + verified research in
 `docs/auto_apply_design.md`. Locked decisions: fill→**you review→you submit** (never blind

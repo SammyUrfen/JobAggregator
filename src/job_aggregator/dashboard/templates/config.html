@@ -59,6 +59,10 @@
       <textarea id="keywords_roles" name="keywords_roles" rows="4">{{ config.keywords.roles | join('\n') }}</textarea>
     </div>
     <div class="field">
+      <label for="keywords_must_have">must_have (job must name &ge;1 — your stack anchors)</label>
+      <textarea id="keywords_must_have" name="keywords_must_have" rows="3">{{ config.keywords.must_have | join('\n') }}</textarea>
+    </div>
+    <div class="field">
       <label for="keywords_exclude">exclude</label>
       <textarea id="keywords_exclude" name="keywords_exclude" rows="2">{{ config.keywords.exclude | join('\n') }}</textarea>
     </div>

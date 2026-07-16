@@ -23,6 +23,10 @@ if TYPE_CHECKING:
 
 _URL = "https://himalayas.app/jobs/api/search"
 _RESULT_LIMIT = 100
+# Himalayas sits behind Cloudflare that 403-challenges a realistic Chrome UA but lets a bare
+# "Mozilla/5.0" through. Best-effort: if Cloudflare tightens this, the source fails gracefully and
+# (thanks to the per-source stale guard) leaves its existing jobs untouched.
+_HIMALAYAS_UA = "Mozilla/5.0"
 # Himalayas salaryPeriod tokens -> our normalized period.
 _HIMA_PERIOD = {
     "annual": "year",
@@ -41,7 +45,7 @@ class HimalayasSource(Source):
 
     def fetch(self, cfg: Config, clock: Clock) -> SourceResult:
         start = time.perf_counter()
-        with make_client() as client:
+        with make_client(user_agent=_HIMALAYAS_UA) as client:
             try:
                 data = get_json(
                     client, _URL, params={"country": self.country.upper(), "limit": _RESULT_LIMIT}

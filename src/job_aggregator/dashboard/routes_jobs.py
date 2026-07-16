@@ -2,34 +2,48 @@
 
 Filters are GET query params (bookmarkable); only the whitelisted ORDER BY fragment and the
 whitelisted action column are ever interpolated — every user value binds via `?`. The detail
-modal body (GET /api/jobs/{uid}/detail) flattens any HTML description to plain text server-side
-(html_to_text) so untrusted source markup never renders. Actions return the updated card partial.
+modal body (GET /api/jobs/{uid}/detail) renders any HTML description into a safe allowlisted-HTML
+subset server-side (render_description_html) so untrusted source markup can't inject. Actions
+return the updated card partial.
 """
 
 from __future__ import annotations
 
+import html
+import logging
+import re
 import sqlite3
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Any, Literal
-from urllib.parse import urlencode
+from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.datastructures import QueryParams
 
 from job_aggregator.dashboard.deps import (
     SchedulerProtocol,
+    get_config,
     get_conn,
     get_scheduler,
     get_templates,
     header_context,
 )
-from job_aggregator.errors import NotFoundError
+from job_aggregator.errors import NotFoundError, RenderError
+from job_aggregator.paths import resumes_dir
+from job_aggregator.profile.store import load_profile
+from job_aggregator.resume.render import compile_pdf, render_latex
+from job_aggregator.resume.tailor import tailor_resume
+
+if TYPE_CHECKING:
+    from job_aggregator.apply.backends import AgentBackend
+    from job_aggregator.config.schema import Config
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
 MAX_Q_LEN = 200
@@ -124,6 +138,107 @@ def html_to_text(raw: str | None) -> str:
     # whitespace between tags; non-empty lines are joined by a single newline.
     lines = (line.strip() for line in "".join(parser.parts).splitlines())
     return "\n".join(line for line in lines if line).strip()[:MAX_DESC_CHARS]
+
+
+# Structural tags the safe renderer EMITS from a closed allowlist (never a source attribute).
+_EMIT_TAGS = frozenset({"p", "br", "ul", "ol", "li", "strong", "em", "code", "pre", "h3", "h4"})
+# Source tags rewritten to an allowlisted equivalent (h1/h2 -> h3 so they don't rival the <h2>).
+_TAG_REWRITE = {"b": "strong", "i": "em", "h1": "h3", "h2": "h3"}
+# Only these href schemes are ever emitted (mirrors canonical_url; blocks javascript:/data:).
+_SAFE_SCHEMES = frozenset({"http", "https", "mailto"})
+
+
+class _SafeHtmlRenderer(HTMLParser):
+    """Re-serialize an untrusted HTML description into a SAFE HTML subset for the detail modal.
+
+    Safe BY CONSTRUCTION: we emit ONLY tags from a fixed allowlist (never a source attribute) and
+    html.escape() every text node ourselves, so no source attribute (onclick/style), no <script>,
+    and no javascript:/data: URL can survive. The only attribute ever emitted is an <a href> whose
+    scheme is checked against _SAFE_SCHEMES. Output is therefore trusted and the template renders it
+    with |safe. convert_charrefs=True hands entities to handle_data decoded, so we re-escape.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+        self._skip = 0  # depth inside a script/style/noscript subtree
+        self._chars = 0  # visible-text budget vs MAX_DESC_CHARS
+        self._has_text = False  # any non-whitespace text emitted (else the modal shows a fallback)
+        self._a_stack: list[bool] = []  # whether each open <a> was actually emitted
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip += 1
+            return
+        if self._skip:
+            return
+        tag = _TAG_REWRITE.get(tag, tag)
+        if tag == "a":
+            href = self._safe_href(attrs)
+            if href:
+                self.parts.append(
+                    f'<a href="{href}" target="_blank" rel="noopener nofollow noreferrer">'
+                )
+            self._a_stack.append(bool(href))
+            return
+        if tag in _EMIT_TAGS:
+            self.parts.append(f"<{tag}>")
+
+    def handle_startendtag(self, tag: str, attrs: Any) -> None:
+        # Self-closing form (e.g. <br/>): emit the allowlisted open tag only.
+        rewritten = _TAG_REWRITE.get(tag, tag)
+        if not self._skip and rewritten in _EMIT_TAGS:
+            self.parts.append(f"<{rewritten}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip = max(0, self._skip - 1)
+            return
+        if self._skip:
+            return
+        tag = _TAG_REWRITE.get(tag, tag)
+        if tag == "a":
+            if self._a_stack and self._a_stack.pop():
+                self.parts.append("</a>")
+            return
+        if tag in _EMIT_TAGS and tag != "br":  # br is void — no closing tag
+            self.parts.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip:
+            return
+        remaining = MAX_DESC_CHARS - self._chars
+        if remaining <= 0:
+            return
+        if len(data) > remaining:  # truncate a single oversized text node, not just future ones
+            data = data[:remaining]
+        self._chars += len(data)
+        if data.strip():
+            self._has_text = True
+        self.parts.append(html.escape(data))
+
+    @staticmethod
+    def _safe_href(attrs: Any) -> str:
+        for name, value in attrs:
+            if name == "href" and value and urlparse(value).scheme.lower() in _SAFE_SCHEMES:
+                return html.escape(value, quote=True)
+        return ""
+
+
+def render_description_html(raw: str | None) -> str:
+    """Render a (possibly HTML) source description into a SAFE HTML subset for the detail modal.
+
+    Unlike html_to_text (which flattens to plain text for keyword extraction), this preserves
+    paragraphs/lists/emphasis/links so the modal reads like a real posting — but every tag is one we
+    emit from a closed allowlist and every text node is escaped, so |safe is sound (see
+    _SafeHtmlRenderer). Returns "" when only markup/whitespace survives (modal shows a fallback).
+    """
+    if not raw:
+        return ""
+    parser = _SafeHtmlRenderer()
+    parser.feed(raw)
+    parser.close()
+    return "".join(parser.parts).strip() if parser._has_text else ""
 
 
 @dataclass(frozen=True)
@@ -263,11 +378,11 @@ def job_detail(
     conn: sqlite3.Connection = Depends(get_conn),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
-    """The detail-modal body for one job: facts + a flattened description + the original link."""
+    """Detail-modal body for one job: facts + a safe-rendered description + the original link."""
     row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
     if row is None:
         raise NotFoundError("job not found", details={"uid": uid})
-    context = {"job": row, "description_text": html_to_text(row["description"])}
+    context = {"job": row, "description_html": render_description_html(row["description"])}
     return templates.TemplateResponse(request, "partials/job_detail.html", context)
 
 
@@ -286,3 +401,56 @@ def job_action(
         raise NotFoundError("job not found", details={"uid": uid})
     row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
     return templates.TemplateResponse(request, "partials/job_card.html", {"job": row})
+
+
+# job_uid is a 64-char sha256 hex — reject anything else before building a filesystem path.
+_JOB_UID_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _tailor_backend(cfg: Config) -> AgentBackend | None:
+    """Seam: the résumé backend for on-click tailoring. Default None = pure deterministic selection
+    (no network, no key, no fabrication risk — the fill→review invariant stays intact). Tests
+    monkeypatch this to inject a fake; a future 'use LLM' toggle would return build_backend here."""
+    return None
+
+
+@router.post("/api/jobs/{uid}/tailor", response_class=HTMLResponse)
+def job_tailor(
+    uid: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+    cfg: Config = Depends(get_config),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> HTMLResponse:
+    """Tailor the résumé to this job and return a preview partial + (if built) a PDF link."""
+    row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
+    if row is None:
+        raise NotFoundError("job not found", details={"uid": uid})
+    profile = load_profile()  # ConfigError -> 422 friendly ("copy the example profile")
+    jd = f"{row['title']}\n{html_to_text(row['description'])}"
+    tailored = tailor_resume(profile, jd, backend=_tailor_backend(cfg), config=cfg.resume)
+    pdf_ready = False
+    try:
+        compile_pdf(render_latex(profile, tailored), resumes_dir() / f"{uid}.pdf")
+        pdf_ready = True
+    except RenderError:
+        log.warning("résumé PDF not built for %s (no engine or build failed); preview only", uid)
+    context = {
+        "job": row,
+        "tailored": tailored,
+        "pdf_ready": pdf_ready,
+        "pdf_url": f"/api/jobs/{uid}/resume.pdf" if pdf_ready else None,
+    }
+    return templates.TemplateResponse(request, "partials/resume_preview.html", context)
+
+
+@router.get("/api/jobs/{uid}/resume.pdf")
+def job_resume_pdf(uid: str) -> FileResponse:
+    """Serve a previously-tailored PDF. data/ is not under /static so serve it explicitly; the uid
+    is validated as sha256 hex before it touches the filesystem (path-traversal guard)."""
+    if not _JOB_UID_RE.match(uid):
+        raise NotFoundError("resume not found", details={"uid": uid})
+    path = resumes_dir() / f"{uid}.pdf"
+    if not path.exists():
+        raise NotFoundError("no tailored résumé for this job yet", details={"uid": uid})
+    return FileResponse(path, media_type="application/pdf", filename=f"resume-{uid[:8]}.pdf")

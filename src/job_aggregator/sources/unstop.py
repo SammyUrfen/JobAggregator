@@ -1,7 +1,7 @@
 """Unstop public JSON source (Phase 3).
 
-India internships/jobs. Loops the configured opportunity kinds, filters on `updated_at` recency
-(the API surfaces stale 2022 posts otherwise), and reads status from `subtype` (never `type`).
+India internships/jobs. Loops the configured opportunity kinds and filters on `updated_at` recency
+(the API surfaces stale 2022 posts otherwise).
 """
 
 from __future__ import annotations
@@ -33,6 +33,29 @@ _PER_PAGE = 30
 _UNSTOP_CCY = {"fa-rupee": "INR", "fa-inr": "INR", "fa-dollar": "USD", "fa-usd": "USD"}
 # Unstop pay_in tokens -> our normalized period.
 _UNSTOP_PERIOD = {"month": "month", "year": "year", "week": "week", "hour": "hour"}
+# public_url is a scheme-less relative path (e.g. 'internships/<slug>-<id>'); seo_url is absolute.
+_UNSTOP_BASE = "https://unstop.com"
+
+
+def _opportunity_url(item: Any) -> str:
+    """Unstop's canonical public link.
+
+    `seo_url` is the full absolute opportunity URL and is preferred. `public_url` is only a
+    scheme-less relative path which 404s as a bare href (it resolves against the dashboard host), so
+    it must be joined onto the Unstop host. `short_url` is a last resort. WHY: the previous
+    code preferred `public_url` and stored the relative path unchanged.
+    """
+    seo = item.get("seo_url")
+    if seo:
+        return str(seo)
+    rel = item.get("public_url")
+    if rel:
+        rel = str(rel)
+        # Prefix the host only when it really is relative (defensive vs. a future shape change).
+        return (
+            rel if rel.startswith(("http://", "https://")) else f"{_UNSTOP_BASE}/{rel.lstrip('/')}"
+        )
+    return str(item.get("short_url") or "")
 
 
 class UnstopSource(Source):
@@ -102,7 +125,7 @@ class UnstopSource(Source):
             source_native_id=str(item.get("id")),
             title=str(item.get("title", "")),
             company=str(org.get("name") or item.get("organisation_name") or ""),
-            url=str(item.get("public_url") or item.get("seo_url") or ""),
+            url=_opportunity_url(item),
             is_remote=None,
             salary_min=pos_int_or_none(detail.get("min_salary")) if disclosed else None,
             salary_max=pos_int_or_none(detail.get("max_salary")) if disclosed else None,

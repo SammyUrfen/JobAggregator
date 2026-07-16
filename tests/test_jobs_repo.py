@@ -366,6 +366,20 @@ def test_last_successful_run_is_strict(conn: sqlite3.Connection, clock: FixedClo
     assert last["run_id"] == r1
 
 
+def test_last_completed_run_includes_partial_skips_failed(
+    conn: sqlite3.Connection, clock: FixedClock
+) -> None:
+    # Catch-up gates on this: a 'partial' is progress; a 'failed' (nothing fetched) is not.
+    r1 = runs_repo.start_run(conn, "manual", clock)
+    runs_repo.finish_run(conn, r1, "success", clock=clock)
+    r2 = runs_repo.start_run(conn, "manual", clock)
+    runs_repo.finish_run(conn, r2, "partial", clock=clock)
+    assert runs_repo.last_completed_run(conn)["run_id"] == r2  # partial = most recent progress
+    r3 = runs_repo.start_run(conn, "manual", clock)
+    runs_repo.finish_run(conn, r3, "failed", clock=clock)
+    assert runs_repo.last_completed_run(conn)["run_id"] == r2  # 'failed' is skipped
+
+
 # ── read helpers for Phase 7 ────────────────────────────────────────────────────────────
 
 

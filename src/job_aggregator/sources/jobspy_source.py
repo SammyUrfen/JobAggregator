@@ -33,7 +33,9 @@ log = logging.getLogger(__name__)
 _SITES_REQUIRING_COUNTRY = frozenset({"indeed", "glassdoor"})
 _SITES_NO_IS_REMOTE = frozenset({"indeed"})
 _VERBOSE = 1
-_DESCRIPTION_FORMAT = "markdown"
+# "html" (not "markdown") so every source feeds the dashboard's one HTML renderer; markdown would
+# otherwise render as literal "**bold**"/"- item" text in the detail modal.
+_DESCRIPTION_FORMAT = "html"
 _INTERVAL_TO_PERIOD = {"yearly": "year", "annual": "year", "monthly": "month", "hourly": "hour"}
 _TRUE_STRINGS = frozenset({"true", "1", "yes"})
 _FALSE_STRINGS = frozenset({"false", "0", "no"})

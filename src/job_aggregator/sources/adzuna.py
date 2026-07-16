@@ -22,15 +22,22 @@ if TYPE_CHECKING:
     from job_aggregator.config.schema import Config
 
 _RESULTS_PER_PAGE = 50
+_PAGES_PER_QUERY = 2  # bound requests: Adzuna is queried once per role phrase (see _role_queries).
+_MAX_ROLE_QUERIES = 6
+_ADZUNA_CATEGORY = (
+    "it-jobs"  # constrain to software/IT at the source (drops accounting/PR/teaching)
+)
 # Adzuna localizes pay to the country's currency; map the ISO country to it.
 _ADZUNA_CCY = {"in": "INR", "gb": "GBP", "us": "USD", "au": "AUD", "ca": "CAD", "de": "EUR"}
 
 
-def _what_or(cfg: Config) -> str:
-    """Space-separated OR query from the configured role keywords (recall over precision — the
-    local filter still narrows). Empty roles -> "" -> Adzuna returns generic recent jobs."""
-    words = dict.fromkeys(w for role in cfg.keywords.roles for w in role.lower().split())
-    return " ".join(words)
+def _role_queries(cfg: Config) -> list[str]:
+    """Adzuna `what` phrases, one per configured role. A per-role AND phrase ("backend engineer")
+    returns genuinely on-topic tech jobs, whereas a broad word-OR of the same roles returns generic
+    noise (accounting/PR/teaching) that merely contains a common word like "engineer" — verified
+    live. Falls back to a generic software query when no roles are configured."""
+    queries = [r.strip() for r in cfg.keywords.roles if r.strip()][:_MAX_ROLE_QUERIES]
+    return queries or ["software engineer"]
 
 
 class AdzunaSource(Source):
@@ -45,29 +52,45 @@ class AdzunaSource(Source):
     def fetch(self, cfg: Config, clock: Clock) -> SourceResult:
         start = time.perf_counter()
         base = f"https://api.adzuna.com/v1/api/jobs/{self.country}/search"
-        what_or = _what_or(cfg)
+        pages = min(self.max_pages, _PAGES_PER_QUERY)
+        seen: set[str] = set()
+        items: list[Any] = []
         with make_client() as client:
+            for what in _role_queries(cfg):
 
-            def fetch_page(page: int) -> list[Any]:
-                params: dict[str, Any] = {
-                    "app_id": self.app_id,
-                    "app_key": self.app_key,
-                    "results_per_page": _RESULTS_PER_PAGE,
-                    "content-type": "application/json",
-                    "sort_by": "date",
-                }
-                if what_or:  # query-target the fetch instead of pulling generic recent jobs
-                    params["what_or"] = what_or
-                data = get_json(client, f"{base}/{page}", params=params)
-                results = data.get("results") if isinstance(data, dict) else None
-                return results if isinstance(results, list) else []
+                def fetch_page(page: int, what: str = what) -> list[Any]:
+                    params: dict[str, Any] = {
+                        "app_id": self.app_id,
+                        "app_key": self.app_key,
+                        "results_per_page": _RESULTS_PER_PAGE,
+                        "content-type": "application/json",
+                        "sort_by": "date",
+                        "category": _ADZUNA_CATEGORY,
+                        "what": what,  # AND phrase -> on-topic tech jobs (not a broad word-OR)
+                    }
+                    data = get_json(client, f"{base}/{page}", params=params)
+                    results = data.get("results") if isinstance(data, dict) else None
+                    return results if isinstance(results, list) else []
 
-            try:
-                items = paginate_until_empty(
-                    fetch_page, max_pages=self.max_pages, page_size=_RESULTS_PER_PAGE
-                )
-            except SourceError as exc:
-                return SourceResult.failed(self.name, str(exc), duration_ms=elapsed_ms(start))
+                try:
+                    page_items = paginate_until_empty(
+                        fetch_page, max_pages=pages, page_size=_RESULTS_PER_PAGE
+                    )
+                except SourceError as exc:
+                    # First-query first-page failure is systemic (bad key) -> fail; a later query
+                    # failing keeps what earlier queries returned.
+                    if not items:
+                        return SourceResult.failed(
+                            self.name, str(exc), duration_ms=elapsed_ms(start)
+                        )
+                    continue
+                for it in page_items:
+                    key = str(it.get("id") or "")
+                    if key and key in seen:
+                        continue
+                    if key:
+                        seen.add(key)
+                    items.append(it)
         return build_result(self.name, items, self._map, duration_ms=elapsed_ms(start))
 
     def _map(self, item: Any) -> RawPosting:

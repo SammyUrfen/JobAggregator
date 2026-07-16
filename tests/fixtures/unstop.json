@@ -7,7 +7,8 @@
         "subtype": "internship",
         "updated_at": "2026-07-10 10:00:00",
         "organisation": { "name": "Acme" },
-        "public_url": "https://unstop.com/o/30111",
+        "public_url": "internships/backend-development-intern-acme-30111",
+        "seo_url": "https://unstop.com/internships/backend-development-intern-acme-30111",
         "jobDetail": {
           "show_salary": 1,
           "not_disclosed": false,
@@ -23,7 +24,8 @@
         "subtype": "internship",
         "updated_at": "2022-03-01 10:00:00",
         "organisation": { "name": "OldCo" },
-        "public_url": "https://unstop.com/o/20777",
+        "public_url": "internships/old-internship-oldco-20777",
+        "seo_url": "https://unstop.com/internships/old-internship-oldco-20777",
         "jobDetail": { "show_salary": 0 }
       }
     ]

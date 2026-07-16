@@ -114,6 +114,20 @@ def last_successful_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
     return row
 
 
+def last_completed_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """Most recent run that made progress: status IN ('success', 'partial').
+
+    Startup catch-up gates on THIS, not strict success. A permanently-blocked source (himalayas 403,
+    naukri recaptcha, an empty feed) makes every run 'partial', so gating on success alone would
+    re-run a full cycle on every `serve` boot. A 'failed' run (no source succeeded)
+    is intentionally excluded so a truly empty cycle still forces a fresh catch-up.
+    """
+    row: sqlite3.Row | None = conn.execute(
+        "SELECT * FROM runs WHERE status IN ('success', 'partial') ORDER BY run_id DESC LIMIT 1"
+    ).fetchone()
+    return row
+
+
 def reconcile_orphan_runs(conn: sqlite3.Connection, clock: Clock) -> int:
     """Finalize any 'running' run left behind by a crash/kill (finish_run never ran). Returns the
     count reaped. Called at process startup: the in-process scheduler is single-instance, so a

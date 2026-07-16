@@ -73,6 +73,7 @@ class AshbySource(Source):
             url=str(item.get("jobUrl") or item.get("applyUrl") or ""),
             location=item.get("location"),
             is_remote=bool(item.get("isRemote")),
+            description=item.get("descriptionHtml"),
             salary_min=smin,
             salary_max=smax,
             salary_currency=ccy,

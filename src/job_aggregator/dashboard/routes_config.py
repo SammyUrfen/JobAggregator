@@ -63,6 +63,7 @@ class ConfigForm(BaseModel):
     require_level: bool | None = None
     keywords_roles: str | None = None
     keywords_bonus: str | None = None
+    keywords_must_have: str | None = None
     keywords_level_required: str | None = None
     keywords_exclude: str | None = None
     locations: str | None = None
@@ -106,6 +107,8 @@ def _apply_keywords(merged: dict[str, Any], f: ConfigForm) -> None:
         kw["roles"] = _split(f.keywords_roles)
     if f.keywords_bonus is not None:
         kw["bonus"] = _split(f.keywords_bonus)
+    if f.keywords_must_have is not None:
+        kw["must_have"] = _split(f.keywords_must_have)
     if f.keywords_level_required is not None:
         kw["level_required"] = _split(f.keywords_level_required)
     if f.keywords_exclude is not None:

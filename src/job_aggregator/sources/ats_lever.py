@@ -70,6 +70,7 @@ class LeverSource(Source):
             url=str(item.get("hostedUrl", "")),
             location=categories.get("location"),
             is_remote=is_remote,
+            description=item.get("description"),
             salary_min=pos_int_or_none(sr.get("min")),
             salary_max=pos_int_or_none(sr.get("max")),
             salary_currency=sr.get("currency"),

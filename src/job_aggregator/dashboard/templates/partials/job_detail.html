@@ -1,6 +1,7 @@
 {% from 'partials/_macros.html' import salary_badge, quick_actions %}
-{#- Modal body for one job. `description_text` is the source description already stripped to plain
-    text server-side (see routes_jobs.html_to_text); rendered escaped, so no source HTML executes. -#}
+{#- Modal body for one job. `description_html` is the source description rendered into a SAFE
+    allowlisted-HTML subset server-side (see routes_jobs.render_description_html), so |safe is sound:
+    no source attribute, <script>, or javascript:/data: URL can execute. -#}
 <div class="jd" data-uid="{{ job.job_uid }}">
   <header class="jd-head">
     <div class="jd-headings">
@@ -34,8 +35,8 @@
   </dl>
 
   <div class="jd-desc">
-    {% if description_text %}
-      <div class="jd-desc-body">{{ description_text }}</div>
+    {% if description_html %}
+      <div class="jd-desc-body">{{ description_html|safe }}</div>
     {% else %}
       <p class="muted">No description provided by the source — open the original posting for details.</p>
     {% endif %}
@@ -52,10 +53,16 @@
               data-apply-url="{{ job.url }}">
         {{ '✓ Applied' if job.applied else 'Apply ↗' }}
       </button>
+      {#- Tailor: build a role-tailored résumé PDF from your profile (Track D Step 0, no browser). -#}
+      <button type="button" class="btn secondary tailor-btn" data-tailor-uid="{{ job.job_uid }}">
+        Tailor résumé
+      </button>
     </div>
+    <div class="jd-tailor" data-uid="{{ job.job_uid }}"></div>
     <div class="jd-secondary actions">{{ quick_actions(job) }}</div>
     <p class="jd-note muted">
-      Auto-fill agent arrives in Track D. For now <b>Apply</b> opens the posting and marks it applied.
+      Auto-fill agent arrives in Track D. <b>Apply</b> opens the posting and marks it applied;
+      <b>Tailor résumé</b> builds a role-tailored PDF from your profile.
     </p>
   </footer>
 </div>

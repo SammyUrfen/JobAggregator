@@ -1,0 +1,31 @@
+{#- Injected into #job-modal .jd-tailor by app.js after POST /api/jobs/{uid}/tailor. All values are
+    Jinja auto-escaped, so this partial is safe. `preservation` = fraction of the source's numeric
+    facts kept after tailoring; flags surface anything the anti-fabrication guard rewrote. -#}
+<div class="tailor-result">
+  <div class="tailor-head">
+    <strong>Tailored résumé</strong>
+    <span class="badge mono">preservation {{ '%.0f'|format(tailored.preservation * 100) }}%</span>
+    <span class="badge mono">{{ tailored.jd_keywords|length }} keywords</span>
+  </div>
+  <div class="tailor-projects">
+    <span class="muted">Selected projects:</span>
+    <ul>
+      {% for p in tailored.projects %}
+        <li>{{ p.name }}{% if p.tagline %} — <span class="muted">{{ p.tagline }}</span>{% endif %}</li>
+      {% else %}
+        <li class="muted">none matched — check your profile's projects</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% if tailored.flags %}
+    <ul class="tailor-flags">
+      {% for f in tailored.flags %}<li class="warn">⚠ {{ f }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  {% if pdf_ready %}
+    <a class="btn secondary" href="{{ pdf_url }}" target="_blank" rel="noopener">Download tailored PDF ↓</a>
+  {% else %}
+    <p class="muted">PDF engine not available on the server (install tectonic/pdflatex). The text
+      preview above is ready; use the CLI <code>tailor</code> command to build the PDF elsewhere.</p>
+  {% endif %}
+</div>

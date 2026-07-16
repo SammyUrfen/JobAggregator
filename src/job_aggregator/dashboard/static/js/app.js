@@ -130,6 +130,33 @@
     }
   }
 
+  // ---- 6) tailor résumé (Track D Step 0) ----------------------------------
+  // POST /api/jobs/{uid}/tailor and inject the returned preview partial into the modal footer.
+  async function postTailor(uid, btn) {
+    const container = document.querySelector(".jd-tailor" + uidSel(uid));
+    if (btn) { btn.disabled = true; btn.textContent = "Tailoring…"; }
+    if (container) container.innerHTML = '<p class="muted">Tailoring…</p>';
+    try {
+      const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/tailor", {
+        method: "POST",
+        headers: { Accept: "text/html" },
+      });
+      if (!res.ok) {
+        let msg = "Tailoring failed.";
+        try { msg = (await res.json()).error.message; } catch (_) {}
+        alert(msg);
+        if (container) container.innerHTML = "";
+        return;
+      }
+      if (container) container.innerHTML = await res.text();
+    } catch (e) {
+      alert("Tailoring failed.");
+      if (container) container.innerHTML = "";
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Tailor résumé"; }
+    }
+  }
+
   // ---- 5) detail modal -----------------------------------------------------
   let lastOpener = null; // restore focus here when the modal closes (a11y)
 
@@ -177,6 +204,13 @@
       const url = applyBtn.getAttribute("data-apply-url");
       if (url) window.open(url, "_blank", "noopener");
       postAction(applyBtn.getAttribute("data-apply-uid"), "apply");
+      return;
+    }
+
+    // Tailor résumé: generate a role-tailored PDF from the profile, inject the preview
+    const tailorBtn = ev.target.closest("[data-tailor-uid]");
+    if (tailorBtn) {
+      postTailor(tailorBtn.getAttribute("data-tailor-uid"), tailorBtn);
       return;
     }
 

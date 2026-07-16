@@ -26,8 +26,9 @@ profile.yaml
 data/*
 !data/.gitkeep
 
-# ── Editor / OS ──
+# ── Editor / OS / tooling ──
 .vscode/
 .idea/
 *.swp
 .DS_Store
+.serena/

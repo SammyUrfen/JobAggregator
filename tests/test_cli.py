@@ -55,6 +55,15 @@ def test_all_subcommands_parse(sub: str) -> None:
     assert callable(args.func)
 
 
+def test_tailor_subcommand_parses() -> None:
+    # uid is a required positional, so `tailor` is intentionally NOT in test_all_subcommands_parse.
+    args = cli.build_parser().parse_args(["tailor", "abc123", "--db", "/tmp/x.db"])
+    assert args.command == "tailor"
+    assert args.uid == "abc123"
+    assert args.llm is False  # LLM rewrite is opt-in via --llm
+    assert callable(args.func)
+
+
 def test_cli_import_is_stdlib_only() -> None:
     # Importing the CLI module must not pull heavy runtime deps into sys.modules.
     code = (

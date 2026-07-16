@@ -30,8 +30,16 @@ log = logging.getLogger(__name__)
 
 # Fallback Jooble query when no roles are configured.
 _DEFAULT_JOOBLE_QUERY = "backend intern"
-# How many role keywords to feed Jooble's OR query (keep the query string bounded).
+# How many role terms to query Jooble with (one query each; keeps the request count bounded).
 _JOOBLE_QUERY_TERMS = 6
+
+
+def _country_location(cfg: Config) -> str:
+    """Jooble matches a country ('India') but returns 0 for a city ('Bengaluru'); pick a
+    country-level location from config, else '' (nationwide)."""
+    if any("india" in loc.lower() for loc in cfg.locations):
+        return "India"
+    return ""
 
 
 def _build_ats(ats: AtsConfig) -> list[Source]:
@@ -49,7 +57,7 @@ def _build_ats(ats: AtsConfig) -> list[Source]:
 
 
 def build_enabled_sources(cfg: Config) -> list[Source]:
-    """Instantiate every enabled source per cfg.sources (Tier A/JobSpy is added in Phase 4)."""
+    """Instantiate every enabled source per cfg.sources in deterministic Tier-A-first order."""
     s = cfg.sources
     out: list[Source] = []
 
@@ -79,12 +87,15 @@ def build_enabled_sources(cfg: Config) -> list[Source]:
     if s.jooble.enabled:
         key = os.environ.get("JOOBLE_API_KEY")
         if key:
-            # Jooble treats comma-separated terms as OR; feed several roles, not just the first.
-            keywords = ", ".join(cfg.keywords.roles[:_JOOBLE_QUERY_TERMS]) or _DEFAULT_JOOBLE_QUERY
-            location = cfg.locations[0] if cfg.locations else ""
+            # One query per role term (a comma-joined dump returns 0), and a COUNTRY location — a
+            # city like "Bengaluru" returns 0 from Jooble; "India"/nationwide works (verified live).
+            queries = cfg.keywords.roles[:_JOOBLE_QUERY_TERMS] or [_DEFAULT_JOOBLE_QUERY]
             out.append(
                 JoobleSource(
-                    api_key=key, keywords=keywords, location=location, max_pages=s.jooble.max_pages
+                    api_key=key,
+                    queries=queries,
+                    location=_country_location(cfg),
+                    max_pages=s.jooble.max_pages,
                 )
             )
         else:

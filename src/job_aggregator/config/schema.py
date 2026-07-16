@@ -15,6 +15,11 @@ from pydantic import BaseModel, Field
 class Keywords(BaseModel):
     roles: list[str] = Field(default_factory=list)
     bonus: list[str] = Field(default_factory=list)
+    # must_have: domain-anchor skills/tech from the user's actual stack. When non-empty, a job must
+    # name at least one (title OR description) to count as relevant. This is the guard that stops a
+    # generic role word ("Software Engineer" on an embedded/teaching post) from passing on the title
+    # alone, no matter how lax `roles` is set. Empty list disables it (legacy behaviour).
+    must_have: list[str] = Field(default_factory=list)
     level_required: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=list)
     require_level: bool = True
@@ -43,7 +48,11 @@ class ScheduleConfig(BaseModel):
 
 class JobSpyConfig(BaseModel):
     enabled: bool = True
-    sites: list[str] = Field(default_factory=lambda: ["naukri", "linkedin", "indeed", "google"])
+    # Naukri and Google are intentionally excluded from the default. Naukri gates its API behind a
+    # recaptcha and returns 406 on every headless scrape (NG3 — no Naukri automation); Google jobs
+    # caps at ~10 results/query and often warns "initial cursor not found". Both are near-zero yield
+    # and pure log-noise here — re-add them only behind a working headful/proxy path (Track D).
+    sites: list[str] = Field(default_factory=lambda: ["linkedin", "indeed"])
     search_terms: list[str] = Field(default_factory=list)
     location: str = "Bengaluru, India"
     country_indeed: str = "india"

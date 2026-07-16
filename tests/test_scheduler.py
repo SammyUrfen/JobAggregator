@@ -81,7 +81,7 @@ def test_catch_up_submits_when_no_prior_success(monkeypatch: pytest.MonkeyPatch)
     fake = _FakeScheduler()
     sched._scheduler = fake
     monkeypatch.setattr(store, "load_effective_config", lambda conn: _cfg(catch_up=True))
-    monkeypatch.setattr(runs_repo, "last_successful_run", lambda conn: None)
+    monkeypatch.setattr(runs_repo, "last_completed_run", lambda conn: None)
     sched.catch_up_on_startup()
     assert len(fake.jobs) == 1
     assert fake.jobs[0]["args"] == [TRIGGER_CATCHUP]
@@ -94,7 +94,7 @@ def test_catch_up_skips_when_recent(monkeypatch: pytest.MonkeyPatch) -> None:
     recent = (NOW - timedelta(hours=1)).isoformat()
     monkeypatch.setattr(store, "load_effective_config", lambda conn: _cfg(catch_up=True))
     monkeypatch.setattr(
-        runs_repo, "last_successful_run", lambda conn: {"finished_at": recent, "started_at": recent}
+        runs_repo, "last_completed_run", lambda conn: {"finished_at": recent, "started_at": recent}
     )
     sched.catch_up_on_startup()
     assert fake.jobs == []

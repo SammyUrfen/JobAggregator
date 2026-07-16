@@ -35,6 +35,31 @@ keywords:
     - consistent hashing
     - kubernetes
     - kafka
+  # must_have: at least one of these stack anchors must appear (title/description) or the job is
+  # dropped as off-domain. This is what stops a generic "Software Engineer" title on an embedded or
+  # teaching post from passing. Empty list disables the gate.
+  must_have:
+    - backend
+    - distributed
+    - systems
+    - infrastructure
+    - platform
+    - database
+    - go
+    - golang
+    - python
+    - c++
+    - kubernetes
+    - docker
+    - microservice
+    - api
+    - machine learning
+    - ml
+    - deep learning
+    - llm
+    - reinforcement learning
+    - inference
+    - pytorch
   # level_required: at least one must appear (title/description) when require_level is true.
   level_required:
     - intern
@@ -53,6 +78,29 @@ keywords:
     - director
     - "5+ years"
     - "clearance required"
+    # off-stack DOMAINS (title screen) — not the user's field
+    - embedded
+    - firmware
+    - hardware
+    - rust
+    - verilog
+    - vhdl
+    - fpga
+    - teacher
+    - teaching
+    - tutor
+    - instructor
+    - faculty
+    - curriculum
+    - music
+    - mechanical
+    - electrical
+    - civil
+    - sales
+    - marketing
+    - recruiter
+    - accountant
+    - nursing
   require_level: true
 
 locations:
@@ -86,7 +134,7 @@ schedule:
 sources:
   jobspy:
     enabled: true
-    sites: [naukri, linkedin, indeed, google]
+    sites: [linkedin, indeed]   # naukri=406 recaptcha, google=~10 results/query; both dropped
     search_terms: ["backend intern", "systems intern", "ml intern", "golang intern"]
     location: "Bengaluru, India"
     country_indeed: india

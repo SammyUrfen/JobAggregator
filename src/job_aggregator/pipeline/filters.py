@@ -64,8 +64,8 @@ def _location_ok(job: Job, cfg: Config) -> bool:
 def _hard_drop_reason(
     job: Job, cfg: Config, *, title_lc: str, hay: str, title_roles: list[str], desc_roles: list[str]
 ) -> str | None:
-    """The first disqualifying reason (exclude → level → role → location), or None if the job
-    clears every hard gate. Salary is handled separately since it can flag rather than drop."""
+    """The first disqualifying reason (exclude → level → role → domain → location), or None if the
+    job clears every hard gate. Salary is handled separately since it can flag rather than drop."""
     kw = cfg.keywords
     for ex in kw.exclude:  # 1. hard excludes (title only)
         if _matches(title_lc, ex):
@@ -74,6 +74,12 @@ def _hard_drop_reason(
         return "no_level"  # 2. level
     if not title_roles and not desc_roles:
         return "no_role_match"  # 3. role
+    # 3b. domain anchor: even with a role-word hit, require at least one must-have skill from the
+    # user's actual stack, so a wrong-DOMAIN job (embedded/teaching/music) that merely reuses a
+    # generic title word like "Software Engineer" is dropped. Correctness does not
+    # depend on enumerating every bad word. Empty must_have disables it (backward compatible).
+    if kw.must_have and not any(_matches(hay, m) for m in kw.must_have):
+        return "no_relevant_skill"
     if not _location_ok(job, cfg):
         return "location_mismatch"  # 4. location
     return None

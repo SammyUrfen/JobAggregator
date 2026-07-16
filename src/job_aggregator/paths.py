@@ -58,6 +58,12 @@ def feed_path() -> Path:
     return data_dir() / "feed.xml"
 
 
+def resumes_dir() -> Path:
+    """Where tailored résumé PDFs are written, one per job as <job_uid>.pdf. Under DATA_DIR so it
+    sits beside the DB/feed and is git-ignored like the rest of data/."""
+    return data_dir() / "resumes"
+
+
 def log_dir() -> Path:
     d = data_dir() / "logs"
     return d
