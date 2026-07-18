@@ -49,9 +49,12 @@
       </a>
       {#- Apply: today it opens the posting and marks the job applied (human applies). The auto-fill
           agent lands in Track D and will hook onto this same button. -#}
+      {#- When apply.enabled (Track D) this launches the LOCAL headful fill agent; otherwise it opens
+          the posting + marks applied (Track B). app.js branches on data-apply-mode. -#}
       <button type="button" class="btn apply-btn" data-apply-uid="{{ job.job_uid }}"
-              data-apply-url="{{ job.url }}">
-        {{ '✓ Applied' if job.applied else 'Apply ↗' }}
+              data-apply-url="{{ job.url }}"
+              data-apply-mode="{{ 'agent' if apply_enabled else 'open' }}">
+        {{ '✓ Applied' if job.applied else ('Auto-apply ▶' if apply_enabled else 'Apply ↗') }}
       </button>
       {#- Tailor: build a role-tailored résumé PDF from your profile (Track D Step 0, no browser). -#}
       <button type="button" class="btn secondary tailor-btn" data-tailor-uid="{{ job.job_uid }}">
@@ -61,8 +64,10 @@
     <div class="jd-tailor" data-uid="{{ job.job_uid }}"></div>
     <div class="jd-secondary actions">{{ quick_actions(job) }}</div>
     <p class="jd-note muted">
-      Auto-fill agent arrives in Track D. <b>Apply</b> opens the posting and marks it applied;
-      <b>Tailor résumé</b> builds a role-tailored PDF from your profile.
+      {% if apply_enabled %}<b>Auto-apply</b> opens a local browser, fills the form from your profile,
+      and stops for you to review + submit.{% else %}<b>Apply</b> opens the posting and marks it
+      applied (turn on the fill agent with <code>apply.enabled</code> + the <code>[apply]</code>
+      extra).{% endif %} <b>Tailor résumé</b> builds a role-tailored PDF from your profile.
     </p>
   </footer>
 </div>

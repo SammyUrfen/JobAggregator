@@ -157,6 +157,18 @@
     }
   }
 
+  // ---- 8) auto-apply: launch the local headful fill agent (when apply.enabled) -----------
+  async function postApply(uid) {
+    try {
+      const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/apply", {
+        method: "POST", headers: { Accept: "application/json" },
+      });
+      const data = await res.json();
+      alert(data.message || (res.ok ? "Launched." : "Could not launch."));
+      if (res.ok && data.ok) postAction(uid, "apply");
+    } catch (e) { alert("Could not launch the apply agent."); }
+  }
+
   // ---- 5) detail modal -----------------------------------------------------
   let lastOpener = null; // restore focus here when the modal closes (a11y)
 
@@ -198,12 +210,17 @@
     // close the modal (✕ button or backdrop)
     if (ev.target.closest("[data-modal-close]")) { closeModal(); return; }
 
-    // Apply: open the original posting in a new tab, then mark the job applied
+    // Apply: when apply.enabled -> launch the local fill agent; else open the posting + mark applied
     const applyBtn = ev.target.closest("[data-apply-uid]");
     if (applyBtn) {
-      const url = applyBtn.getAttribute("data-apply-url");
-      if (url) window.open(url, "_blank", "noopener");
-      postAction(applyBtn.getAttribute("data-apply-uid"), "apply");
+      const uid = applyBtn.getAttribute("data-apply-uid");
+      if (applyBtn.getAttribute("data-apply-mode") === "agent") {
+        postApply(uid);
+      } else {
+        const url = applyBtn.getAttribute("data-apply-url");
+        if (url) window.open(url, "_blank", "noopener");
+        postAction(uid, "apply");
+      }
       return;
     }
 
@@ -264,6 +281,27 @@
             if (slot) slot.textContent = e.message;
           });
           if (banner) { banner.textContent = "Please fix the errors above."; banner.className = "banner err"; }
+        }
+      } catch (e) {
+        if (banner) { banner.textContent = "Save failed."; banner.className = "banner err"; }
+      }
+    });
+  }
+
+  // ---- 7) profile editor: PUT the YAML, surface validation errors in the banner ----------
+  const profileForm = document.getElementById("profile-form");
+  if (profileForm) {
+    profileForm.addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      const banner = document.getElementById("profile-banner");
+      try {
+        const res = await fetch("/api/profile", { method: "PUT", body: new FormData(profileForm) });
+        const data = await res.json();
+        if (res.ok) {
+          if (banner) { banner.textContent = data.message || "Saved."; banner.className = "banner ok"; }
+        } else {
+          const msg = (data.error && data.error.message) || "Invalid profile.";
+          if (banner) { banner.textContent = msg; banner.className = "banner err"; }
         }
       } catch (e) {
         if (banner) { banner.textContent = "Save failed."; banner.className = "banner err"; }

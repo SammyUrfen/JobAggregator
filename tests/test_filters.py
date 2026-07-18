@@ -24,8 +24,10 @@ def test_hard_drop_exclude_keyword(make_job: JobFactory, cfg: Config) -> None:
 
 
 def test_hard_drop_no_level(make_job: JobFactory, cfg: Config) -> None:
+    strict = cfg.model_copy(deep=True)
+    strict.keywords.require_level = True  # off by default now; test the level gate explicitly
     job = make_job(title="Backend Engineer", description="build APIs")
-    verdict = score_and_filter(job, cfg)
+    verdict = score_and_filter(job, strict)
     assert verdict.keep is False
     assert verdict.reasons == ["no_level"]
 
@@ -38,13 +40,20 @@ def test_hard_drop_no_role(make_job: JobFactory, cfg: Config) -> None:
 
 
 def test_keep_full_score(make_job: JobFactory, cfg: Config) -> None:
+    c = cfg.model_copy(deep=True)
+    c.keywords.roles = [
+        "backend engineer",
+        "distributed systems",
+    ]  # fixed set -> deterministic score
+    c.keywords.bonus = ["Go", "Kubernetes"]
+    c.keywords.must_have = []  # isolate scoring from the must_have gate
     job = make_job(
         title="Backend Engineer Intern",
         is_remote=True,
         description="Go and Kubernetes, distributed systems",
         salary_bucket=SalaryBucket.PASS,
     )
-    verdict = score_and_filter(job, cfg)
+    verdict = score_and_filter(job, c)
     assert verdict.keep is True
     # 10 role-title + 3 role-desc(distributed systems) + 8 bonus(Go, Kubernetes) + 5 remote + 6 PASS
     assert verdict.score == 32.0
@@ -60,13 +69,16 @@ def test_hard_drop_salary_fail(make_job: JobFactory, cfg: Config) -> None:
 
 
 def test_keep_in_office_unknown_salary_demoted(make_job: JobFactory, cfg: Config) -> None:
+    c = cfg.model_copy(deep=True)
+    c.keywords.roles = ["backend engineer"]  # single role -> deterministic score
+    c.keywords.must_have = []
     job = make_job(
         title="Backend Engineer Intern",
         is_remote=False,
         description="backend systems platform",
         salary_bucket=SalaryBucket.UNKNOWN,
     )
-    verdict = score_and_filter(job, cfg)
+    verdict = score_and_filter(job, c)
     assert verdict.keep is True
     assert verdict.score == 5.0  # 10 role-title - 5 in-office-unknown demote
 

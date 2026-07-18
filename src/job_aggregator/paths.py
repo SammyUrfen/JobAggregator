@@ -64,6 +64,12 @@ def resumes_dir() -> Path:
     return data_dir() / "resumes"
 
 
+def sessions_dir() -> Path:
+    """Where Fernet-encrypted Playwright storageState blobs live, one per domain as <domain>.enc
+    (Track D). Under DATA_DIR so it's git-ignored like the rest of data/; never commit these."""
+    return data_dir() / "sessions"
+
+
 def log_dir() -> Path:
     d = data_dir() / "logs"
     return d

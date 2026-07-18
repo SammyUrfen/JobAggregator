@@ -6,6 +6,7 @@ Subcommands (see PLAN.md Part II for full behaviour):
     serve         launch the FastAPI dashboard (which owns the daily scheduler)  [Phase 8]
     show-config   print the effective config currently stored in the DB
     tailor        tailor the résumé to one job by uid -> a PDF (Track D Step 0)
+    apply         fill a job application in a headful browser to review + submit (Track D; local)
 
 Design note: heavy third-party imports (fastapi, jobspy, apscheduler, pydantic) are done
 LAZILY inside each handler so that `python -m job_aggregator --help` works with only the
@@ -143,6 +144,59 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_apply(args: argparse.Namespace) -> int:
+    """Fill a job application in a HEADFUL browser for you to review + submit (Track D; run LOCALLY,
+    not in headless docker). Needs `pip install -e '.[apply]' && playwright install chromium`."""
+    from job_aggregator.apply.agent import apply_to_job
+    from job_aggregator.apply.driver import PlaywrightDriver
+    from job_aggregator.config.store import load_effective_config
+    from job_aggregator.errors import ConfigError, NotFoundError
+    from job_aggregator.logging_setup import configure_logging
+    from job_aggregator.models.job import Job
+    from job_aggregator.profile.store import load_profile
+    from job_aggregator.storage.db import connect
+
+    configure_logging(args.log_level)
+    conn = connect(args.db)
+    row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (args.uid,)).fetchone()
+    if row is None:
+        raise NotFoundError("job not found", details={"uid": args.uid})
+    cfg = load_effective_config(conn)
+    profile = load_profile()
+    # The driver needs an LLM for Set-of-Marks grounding (fills arbitrary forms). If no key is
+    # configured, build_backend raises ConfigError and we fall back to deterministic/generic fills.
+    ground_backend = None
+    try:
+        from job_aggregator.apply.backends import build_backend
+
+        ground_backend = build_backend(cfg.resume)
+    except ConfigError:
+        pass
+    job = Job.model_validate(
+        {
+            "job_uid": row["job_uid"],
+            "source": row["source"],
+            "title": row["title"],
+            "company": row["company"],
+            "url": row["url"],
+            "location": row["location"],
+            "description": row["description"],
+            "is_remote": bool(row["is_remote"]) if row["is_remote"] is not None else None,
+        }
+    )
+    driver = PlaywrightDriver(backend=ground_backend)
+    result = apply_to_job(
+        job, profile, cfg, driver=driver, backend=(ground_backend if args.llm else None)
+    )
+    print(f"ATS: {result.ats or 'generic'}  |  filled: {', '.join(result.filled) or 'none'}")
+    print(f"unfilled: {', '.join(result.unfilled) or 'none'}  |  résumé: {result.resume_pdf}")
+    print(f"preservation: {result.preservation:.0%}")
+    for flag in result.flags:
+        print(f"  ! {flag}")
+    print("NOT auto-submitted — you reviewed and submitted it yourself in the browser.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from job_aggregator.paths import default_db_path
 
@@ -188,6 +242,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--out", default=None, help="output PDF path (default data/resumes/<uid>.pdf)"
     )
     p_tailor.set_defaults(func=cmd_tailor)
+
+    p_apply = sub.add_parser(
+        "apply",
+        help="fill a job application in a headful browser to review + submit (Track D; local)",
+        parents=[common],
+    )
+    p_apply.add_argument("uid", help="job_uid to apply for (from the dashboard/DB)")
+    p_apply.add_argument(
+        "--llm", action="store_true", help="reword résumé bullets via the configured backend"
+    )
+    p_apply.set_defaults(func=cmd_apply)
 
     return parser
 

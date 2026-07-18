@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import html
 import logging
+import os
 import re
 import sqlite3
+import subprocess
+import sys
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any, Literal
@@ -33,7 +36,7 @@ from job_aggregator.dashboard.deps import (
     header_context,
 )
 from job_aggregator.errors import NotFoundError, RenderError
-from job_aggregator.paths import resumes_dir
+from job_aggregator.paths import default_db_path, resumes_dir
 from job_aggregator.profile.store import load_profile
 from job_aggregator.resume.render import compile_pdf, render_latex
 from job_aggregator.resume.tailor import tailor_resume
@@ -376,13 +379,18 @@ def job_detail(
     uid: str,
     request: Request,
     conn: sqlite3.Connection = Depends(get_conn),
+    cfg: Config = Depends(get_config),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
     """Detail-modal body for one job: facts + a safe-rendered description + the original link."""
     row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
     if row is None:
         raise NotFoundError("job not found", details={"uid": uid})
-    context = {"job": row, "description_html": render_description_html(row["description"])}
+    context = {
+        "job": row,
+        "description_html": render_description_html(row["description"]),
+        "apply_enabled": cfg.apply.enabled,
+    }
     return templates.TemplateResponse(request, "partials/job_detail.html", context)
 
 
@@ -454,3 +462,30 @@ def job_resume_pdf(uid: str) -> FileResponse:
     if not path.exists():
         raise NotFoundError("no tailored résumé for this job yet", details={"uid": uid})
     return FileResponse(path, media_type="application/pdf", filename=f"resume-{uid[:8]}.pdf")
+
+
+def _launch_apply(uid: str, db_path: str) -> None:  # pragma: no cover - spawns a local process
+    """Spawn `job-aggregator apply <uid>` locally (opens a headful browser on the user's desktop).
+    Detached so the route returns immediately; the browser stays open for review + submit."""
+    subprocess.Popen([sys.executable, "-m", "job_aggregator", "apply", uid, "--db", db_path])
+
+
+@router.post("/api/jobs/{uid}/apply")
+def job_apply(
+    uid: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+    cfg: Config = Depends(get_config),
+) -> dict[str, Any]:
+    """Launch the local headful apply agent for this job. Guarded by apply.enabled; only works when
+    serve runs on your desktop (needs a display) with the `[apply]` extra. The uid must match a
+    stored job, and the subprocess uses list-argv (no shell), so it can't inject."""
+    if conn.execute("SELECT 1 FROM jobs WHERE job_uid = ?", (uid,)).fetchone() is None:
+        raise NotFoundError("job not found", details={"uid": uid})
+    if not cfg.apply.enabled:
+        return {
+            "ok": False,
+            "message": "Apply agent is off. Set apply.enabled: true, install '.[apply]' + "
+            "`playwright install chromium`, and run serve on your desktop.",
+        }
+    _launch_apply(uid, os.environ.get("JOBAGG_DB") or str(default_db_path()))
+    return {"ok": True, "message": "A browser window is opening — review, submit, then close it."}

@@ -4,21 +4,34 @@
 # Keep it in sync with the Pydantic models in src/job_aggregator/config/schema.py.
 
 keywords:
-  # roles: matched against the job title (primary signal). Tune to your target internships.
+  # roles: a role word must appear in the title/description. Kept BROAD on purpose — `must_have`
+  # below carries the real relevance filtering, so a generic "software engineer" is fine here and a
+  # narrow list (missing "software engineer"/"developer") would wrongly drop most real SWE postings.
   roles:
     - backend engineer
+    - backend developer
+    - software engineer
+    - software developer
+    - systems engineer
     - systems software
     - distributed systems
     - infrastructure engineer
     - platform engineer
     - site reliability
     - database engineer
+    - data engineer
+    - devops
+    - cloud engineer
     - ml engineer
     - machine learning engineer
     - ai engineer
     - llm engineer
-    - reinforcement learning
     - mlops
+    - reinforcement learning
+    - golang developer
+    - python developer
+    - sde
+    - backend
   # bonus: +score if present in title/description; never required.
   bonus:
     - Go
@@ -101,7 +114,10 @@ keywords:
     - recruiter
     - accountant
     - nursing
-  require_level: true
+  # require_level=false: an explicit "intern/junior/new grad" word is NOT required — most real
+  # entry/mid postings don't use those words, and require_level=true dropped ~half of all jobs.
+  # Relevance comes from roles + must_have + exclude (which screens senior/staff/lead/etc.).
+  require_level: false
 
 locations:
   - "Bengaluru, India"
@@ -185,7 +201,9 @@ sources:
 resume:
   # Backend for per-role résumé tailoring: "openai_compatible" (HTTP endpoint) or "coding_agent"
   # (a local CLI like Claude Code). The API key is read from the env var named below, never here.
-  backend: openai_compatible
+  # "coding_agent" = Claude Code headless (`claude -p`) — NO API key needed (default). Switch to
+  # "openai_compatible" only if you'd rather call an HTTP endpoint (then set the key env in .env).
+  backend: coding_agent
   base_url: https://api.openai.com/v1
   model: gpt-4o-mini
   api_key_env: OPENAI_API_KEY

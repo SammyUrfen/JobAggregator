@@ -533,6 +533,85 @@ def test_config_put_persists_must_have(client: TestClient, db_path: str) -> None
     assert cfg["keywords"]["must_have"] == ["backend", "go", "kubernetes"]
 
 
+def test_profile_page_renders(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("JOBAGG_PROFILE", str(tmp_path / "profile.yaml"))  # never the real profile
+    r = client.get("/profile")
+    assert r.status_code == 200
+    assert "profile.yaml" in r.text
+    assert "contact" in r.text  # falls back to the committed example when none exists yet
+
+
+def test_profile_put_valid_saves(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from job_aggregator.paths import PROFILE_EXAMPLE_YAML
+
+    target = tmp_path / "profile.yaml"
+    monkeypatch.setenv("JOBAGG_PROFILE", str(target))
+    r = client.put("/api/profile", data={"profile_yaml": PROFILE_EXAMPLE_YAML.read_text()})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert target.exists() and "contact" in target.read_text()
+
+
+def test_profile_put_invalid_422(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / "profile.yaml"
+    monkeypatch.setenv("JOBAGG_PROFILE", str(target))
+    r = client.put("/api/profile", data={"profile_yaml": "contact: 123"})  # contact must be object
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "config_invalid"
+    assert not target.exists()  # an invalid profile is never written
+
+
+def test_apply_route_disabled_returns_ok_false(client: TestClient) -> None:
+    # apply.enabled is false by default -> the route reports it's off (200, ok=false), no launch
+    r = client.post("/api/jobs/j1/apply")
+    assert r.status_code == 200
+    assert r.json()["ok"] is False
+
+
+def test_apply_route_launches_when_enabled(
+    client: TestClient, db_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json as _json
+
+    from job_aggregator.dashboard import routes_jobs
+
+    conn = connect(db_path)
+    data = _json.loads(conn.execute("SELECT data FROM config WHERE id=1").fetchone()["data"])
+    data["apply"]["enabled"] = True
+    conn.execute("UPDATE config SET data=? WHERE id=1", (_json.dumps(data),))
+    conn.commit()
+    conn.close()
+    launched: list[tuple[str, str]] = []
+    monkeypatch.setattr(routes_jobs, "_launch_apply", lambda uid, db: launched.append((uid, db)))
+    r = client.post("/api/jobs/j1/apply")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert launched and launched[0][0] == "j1"  # the local agent was spawned for this job
+
+
+def test_apply_route_unknown_uid_404(client: TestClient) -> None:
+    r = client.post("/api/jobs/" + "a" * 64 + "/apply")  # valid-looking uid, not in the DB
+    assert r.status_code == 404
+
+
+def test_config_put_persists_apply_and_backend(client: TestClient, db_path: str) -> None:
+    r = client.put("/api/config", data={"apply_enabled": "true", "resume_backend": "coding_agent"})
+    assert r.status_code == 200
+    conn = connect(db_path)
+    cfg = __import__("json").loads(
+        conn.execute("SELECT data FROM config WHERE id=1").fetchone()["data"]
+    )
+    conn.close()
+    assert cfg["apply"]["enabled"] is True
+    assert cfg["resume"]["backend"] == "coding_agent"
+
+
 def test_config_put_can_disable_toggles(client: TestClient, db_path: str) -> None:
     # Regression: a boolean toggle must be turn-OFF-able, not just turn-on-able. The JS sends an
     # explicit "false" for unchecked boxes; verify the server disables the setting.

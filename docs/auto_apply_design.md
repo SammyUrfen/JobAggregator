@@ -1,8 +1,9 @@
 # Auto-Apply extension — design & feasibility (research-grounded)
 
-> Status: **building.** Grounded in a verified deep-research pass (2026-07-16, 25 sources,
-> 20 confirmed / 5 refuted claims). This is the "generate → agent-fills → human-reviews →
-> human-submits" architecture, plus the reboot-durable service and card UI.
+> Status: **Tracks A–D COMPLETE (built, gate-green, fake-driver-tested).** Grounded in a verified
+> deep-research pass (2026-07-16, 25 sources, 20 confirmed / 5 refuted claims). This is the
+> "generate → agent-fills → human-reviews → human-submits" architecture, plus the reboot-durable
+> service and card UI. Live browser fill is opt-in and un-run in CI — see "Live validation" below.
 >
 > **Decisions (locked 2026-07-16):** submit model = **agent fills → you review → you submit**;
 > platforms = **both** (ATS as the reliable core; LinkedIn/Naukri best-effort with anti-bot
@@ -25,20 +26,32 @@
 > **Coverage pass: DONE.** `paginate_until_empty` (loop-until-empty + `max_pages` cap) on Adzuna
 > (+query targeting), Jooble, Unstop. Live: raw fetch ~246 → ~1211.
 >
-> **Track D (browser apply agent): NOT STARTED (build plan below).** Needs an MCP/Playwright-capable
-> session — see **"Track D — build plan (next session)"**.
+> **Track D (browser apply agent): DONE (build plan below is now the as-built map).** Opt-in
+> `[apply]` extra (browser-use / playwright / cryptography). Encrypted per-domain session store
+> (`apply/session.py`, Fernet, `data/sessions/<domain>.enc`); `BrowserDriver` Protocol + `FakeDriver`
+> + `PlaywrightDriver` (`apply/driver.py`); **Set-of-Marks DOM grounding** lifted from the Form
+> Controller Agent (`apply/detector.py` JS field-detect → `apply/grounding.py` LLM value-mapping,
+> code owns geometry, model owns semantics); deterministic ATS field maps
+> (`apply/ats/{greenhouse,lever,ashby,smartrecruiters}.py` + `detect_ats`); orchestrator
+> (`apply/agent.py`) that refuses when `apply.enabled` is false or `apply.auto_submit` is true, fills
+> then **stops at Submit**. Dashboard wired: `POST /api/jobs/{uid}/apply` (guarded) spawns the CLI
+> `apply` subcommand; detail-modal Apply button branches on `apply.enabled`. Config surfaced in the
+> dashboard (Config → "Apply agent (Track D)": `apply.enabled` + `resume.backend` picker) and in
+> `.env.example` (`JOBAGG_SESSION_KEY`). The review-gate pauses on `while browser.is_connected()`
+> (not `input()`) so it works when dashboard-spawned. **Never auto-submits.**
 >
-> **State @ 2026-07-16:** 304 tests green, 89.8% cov, `ruff`/`mypy` clean. All of the above is
-> **committed** (`219bc9b`, `294dbad`); only this doc + `CLAUDE.md` carry later uncommitted edits.
+> **State @ 2026-07-18:** 372 tests green, 90.16% cov, `ruff`/`mypy` clean. Tracks A–C + coverage
+> committed (`219bc9b`, `294dbad`, `6c69bbc`); the Track D batch is in this same commit round.
 > `profile.yaml` is git-ignored (personal).
 >
 > ### 👉 Handoff — start here next session
-> 1. `git status` — Tracks B/C + the coverage pass are already committed; only doc edits remain.
+> 1. `git status` / `git log` — everything through Track D is committed; the tree should be clean.
 > 2. Verify `profile.yaml` facts are correct (it's your ground truth; git-ignored).
-> 3. **Quick win, no browser needed:** wire the working résumé engine to a user surface — a
->    `tailor` CLI subcommand and/or a `POST /api/jobs/{uid}/tailor` route + a "Tailor résumé"
->    button in the detail modal. This makes Track C usable today and is fully testable.
-> 4. Then build **Track D** per the plan at the bottom of this doc (needs a real browser).
+> 3. **Track D is built but never run against a real browser** — do the "Live validation" below on
+>    your machine (needs a display + `pip install -e '.[apply]'` + a `JOBAGG_SESSION_KEY`). Report
+>    per-ATS fill reliability, which the fake-driver tests can't cover.
+> 4. Everything else (résumé tailoring CLI + `POST /api/jobs/{uid}/tailor` + Tailor button, profile
+>    editor at `/profile`) is live and testable today.
 
 ## Problem
 
@@ -169,11 +182,12 @@ form in the real browser and click **Submit** yourself. Nothing is sent without 
 - **Form-fill reliability** — deterministic field maps for known ATS; LLM only for the unknown; always
   human-review before submit.
 
-## Track D — build plan (next session)
+## Track D — as-built map (was: build plan)
 
-Everything below is unbuilt. It needs a session with a **real browser** (headful Chromium) and a
-Playwright/MCP-capable environment — a background/CI run can't validate it. Ships **opt-in**
-(`apply.enabled`, default false) with the non-browser logic unit-tested via a fake driver.
+**Built and gate-green** (Steps 0–5 below are done; Step 6 is the remaining live check). Ships
+**opt-in** (`apply.enabled`, default false) with the non-browser logic unit-tested via `FakeDriver`.
+Live headful fill still needs a **real browser** (Chromium) + `pip install -e '.[apply]'` — a
+background/CI run can't validate it. See **"Live validation"** (Step 6).
 
 ### Step 0 — intermediate win first (no browser)
 The résumé engine (`resume/tailor.py` + `render.py`) already works but has **no user surface**.
@@ -229,11 +243,13 @@ Per-job, human-triggered flow (matches the "Apply flow" section above):
   Easy Apply / Naukri: keep behind an extra opt-in flag, headful-only, with the anti-bot/ToS
   warning in the UI. Never auto-submit anywhere.
 
-### Step 6 — validate live (on your machine)
-`pip install -e '.[apply]'` → `playwright install chromium` → set `apply.enabled: true` → pick a
-Greenhouse/Lever posting → click **Apply** → watch it fill → **you** submit. Confirm session
+### Step 6 — Live validation (REMAINING — the one un-done piece)
+On your machine, with a display: `pip install -e '.[apply]'` → `playwright install chromium` → set
+`JOBAGG_SESSION_KEY` in `.env` → turn on **apply.enabled** (Config page, or `default_config.yaml`) →
+pick a Greenhouse/Lever posting → click **Apply** → watch it fill → **you** submit. Confirm session
 persistence (second apply on the same domain skips login). Report what the fake-driver tests can't:
-real form-fill reliability per ATS.
+real form-fill reliability per ATS. Backend is `resume.backend` (default `coding_agent` = Claude
+Code `claude -p`, no API key; switch to `openai_compatible` only if you want an HTTP endpoint).
 
 ## Open research questions (unresolved by the deep-research pass — design around them)
 

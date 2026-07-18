@@ -38,6 +38,14 @@ dev = [
     "mypy>=1.10",
     "types-PyYAML",
 ]
+# Track D (browser apply agent) — opt-in; the core tool never needs these. Install with
+# `pip install -e '.[apply]' && playwright install chromium`. Lazy-imported behind seams so
+# pytest/mypy never require them (mirrors the jobspy `_scrape_jobs` seam).
+apply = [
+    "browser-use>=0.1",         # MIT, Playwright-based DOM-first browser agent (headful)
+    "playwright>=1.45",          # storageState session persistence + deterministic ATS fills
+    "cryptography>=42",          # Fernet encryption for the persisted session blobs at rest
+]
 
 [project.scripts]
 job-aggregator = "job_aggregator.cli:main"
@@ -93,6 +101,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/job_aggregator/notify/base.py" = ["PLC0415"]
 # dashboard create_app defers scheduler/clock/connect imports (keeps build light, no cycle).
 "src/job_aggregator/dashboard/app.py" = ["PLC0415"]
+# apply/ (Track D) lazy-imports the [apply] extra (cryptography/playwright) behind seams so the
+# core tool never requires them (mirrors the jobspy _scrape_jobs seam).
+"src/job_aggregator/apply/session.py" = ["PLC0415"]
+"src/job_aggregator/apply/driver.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -107,7 +119,7 @@ namespace_packages = true
 mypy_path = "src"
 # jobspy / apscheduler ship without full type stubs; allow untyped imports for those only.
 [[tool.mypy.overrides]]
-module = ["jobspy.*", "apscheduler.*", "pandas", "pandas.*"]
+module = ["jobspy.*", "apscheduler.*", "pandas", "pandas.*", "browser_use.*", "playwright.*", "cryptography.*"]
 ignore_missing_imports = true
 
 # ── Pytest ──
@@ -126,7 +138,7 @@ source = ["job_aggregator"]
 # Network-bound adapters + the thin CLI/dashboard shells are exercised by respx-mocked and
 # TestClient tests, but their line coverage is noisy and would mask the correctness core; the
 # hard gate is on storage/pipeline/config/models/sources/scheduler/notify.
-omit = ["*/__main__.py", "*/cli.py", "*/dashboard/*", "*/logging_setup.py"]
+omit = ["*/__main__.py", "*/cli.py", "*/dashboard/*", "*/logging_setup.py", "*/apply/session.py"]
 
 [tool.coverage.report]
 show_missing = true

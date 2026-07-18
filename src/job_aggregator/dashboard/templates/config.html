@@ -96,6 +96,24 @@
     </div>
   </fieldset>
 
+  <fieldset>
+    <legend>Apply agent (Track D)</legend>
+    <label class="chk"><input type="checkbox" name="apply_enabled" value="true"
+      {% if config.apply.enabled %}checked{% endif %}> apply.enabled (turn the browser fill agent on)</label>
+    <div class="field">
+      <label for="resume_backend">LLM backend (résumé tailoring + form-fill)</label>
+      <select id="resume_backend" name="resume_backend">
+        <option value="coding_agent"
+          {% if config.resume.backend == 'coding_agent' %}selected{% endif %}>coding_agent — Claude Code (claude -p), no API key</option>
+        <option value="openai_compatible"
+          {% if config.resume.backend == 'openai_compatible' %}selected{% endif %}>openai_compatible — HTTP endpoint (needs a key in .env)</option>
+      </select>
+    </div>
+    <p class="muted">Never auto-submits — you review + submit. Runs locally + headful: install
+      <code>pip install -e '.[apply]'</code> and set <code>JOBAGG_SESSION_KEY</code> in <code>.env</code>.
+      With Claude Code (coding_agent) no API key is needed.</p>
+  </fieldset>
+
   <button class="btn" type="submit">Save config</button>
   <span class="banner" id="config-banner" role="status"></span>
 </form>

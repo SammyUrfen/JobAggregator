@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 from job_aggregator.errors import ConfigError
-from job_aggregator.paths import default_profile_path
+from job_aggregator.paths import PROFILE_EXAMPLE_YAML, default_profile_path
 from job_aggregator.profile.schema import Profile
 
 
@@ -34,3 +34,32 @@ def load_profile(path: str | Path | None = None) -> Profile:
         return Profile.model_validate(raw)
     except Exception as exc:  # pydantic ValidationError -> friendly envelope
         raise ConfigError(f"profile failed validation: {exc}", details=where) from exc
+
+
+def load_profile_text(path: str | Path | None = None) -> str:
+    """The raw profile YAML, for the dashboard editor. Returns the committed example as a starting
+    template when no personal profile.yaml exists yet, so the editor is never blank."""
+    resolved = Path(path) if path is not None else default_profile_path()
+    if resolved.exists():
+        return resolved.read_text(encoding="utf-8")
+    return PROFILE_EXAMPLE_YAML.read_text(encoding="utf-8")
+
+
+def save_profile_text(text: str, path: str | Path | None = None) -> Profile:
+    """Validate raw YAML against the Profile model, then write it. Raises ConfigError (friendly) on
+    a parse/validation failure — an invalid profile is NEVER persisted (it would silently corrupt a
+    tailored résumé). On success the new profile takes effect immediately (load_profile re-reads).
+    """
+    resolved = Path(path) if path is not None else default_profile_path()
+    where: dict[str, object] = {"path": str(resolved)}
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"profile YAML is invalid: {exc}", details=where) from exc
+    try:
+        profile = Profile.model_validate(raw)
+    except Exception as exc:  # pydantic ValidationError -> friendly envelope
+        raise ConfigError(f"profile failed validation: {exc}", details=where) from exc
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(text, encoding="utf-8")
+    return profile

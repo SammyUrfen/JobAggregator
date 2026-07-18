@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Profile · JobAggregator{% endblock %}
+{% block content %}
+<form id="profile-form" class="card config">
+  <p class="muted">
+    Your ground-truth résumé data (<code>profile.yaml</code>) — the single source of truth for
+    résumé tailoring and the apply agent. Edited as YAML and <b>validated on save</b>, so a typo is
+    rejected rather than silently corrupting a tailored résumé. Changes take effect immediately.
+  </p>
+  <div id="profile-banner" class="banner" role="status"></div>
+  <div class="field">
+    <label for="profile_yaml">profile.yaml</label>
+    <textarea id="profile_yaml" name="profile_yaml" rows="28" spellcheck="false"
+      style="font-family: var(--font-mono, monospace); font-size: 12px;">{{ profile_yaml }}</textarea>
+  </div>
+  <button type="submit" class="btn">Save profile</button>
+</form>
+{% endblock %}

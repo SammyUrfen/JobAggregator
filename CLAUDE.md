@@ -31,13 +31,16 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   agent). Read it before touching Track A–D work.
 
 ## Current status
-**v1 COMPLETE (Phases 0–9) + auto-apply Tracks A–C done; Track D remaining.** Full gate green:
-`ruff check .`, `ruff format --check .`, `mypy src`, `pytest` (**304 passed** / 0 skipped; coverage
-**89.8%**, hard gate 85%). Verified live: a real cycle writes+dedups jobs and emits a valid Atom
-`feed.xml`; the dashboard serves all routes; résumé tailoring produces a real PDF.
-**Tracks A–C + the coverage pass are committed** (`219bc9b`, `294dbad`); only `CLAUDE.md` +
-`docs/auto_apply_design.md` carry later uncommitted doc edits. `profile.yaml` is git-ignored
-(personal). **Next: read `docs/auto_apply_design.md` → "Handoff — start here" + "Track D — build plan".**
+**v1 COMPLETE (Phases 0–9) + auto-apply Tracks A–D ALL done.** Full gate green:
+`ruff check .`, `ruff format --check .`, `mypy src`, `pytest` (**372 passed** / 0 skipped; coverage
+**90.16%**, hard gate 85%). Verified live: a real cycle writes+dedups jobs and emits a valid Atom
+`feed.xml`; the dashboard serves all routes (incl. `/profile` YAML editor); résumé tailoring
+produces a real PDF; a fresh Docker cycle kept ~129 relevant jobs (the earlier "only 1 job" was a
+**stale image** — always `docker compose up --build`, not the filter). `profile.yaml` is git-ignored
+(personal). **The ONLY un-done piece is running the Track D apply agent against a real browser** —
+see `docs/auto_apply_design.md` → "Live validation" (Step 6): needs a display +
+`pip install -e '.[apply]'` + `JOBAGG_SESSION_KEY`. **Next session: `git log` (tree should be clean),
+then either do the live Track D check or move to new work.**
 
 **Auto-apply extension (post-v1) — in progress.** Design + verified research in
 `docs/auto_apply_design.md`. Locked decisions: fill→**you review→you submit** (never blind
@@ -70,11 +73,30 @@ coding-agent/Claude Code). Build order A→B→C→D.
   short page/`max_pages` cap; first-page error fails, later-page error keeps earlier). Applied to
   Adzuna (+`what_or` query targeting), Jooble (+multi-role query), Unstop (per-opportunity). Live:
   adzuna 50→500, unstop 60→300, jooble 0→200. `max_pages` knobs in config.
-- **Track D (browser apply agent): REMAINING.** Config scaffolded (`apply.enabled`/`auto_submit`
-  both false). To build: encrypted Playwright-`storageState` session store; browser-use orchestrator
-  (headful, fill→review→submit, behind a seam); ATS field maps first; dashboard Apply wiring +
-  "Tailor" preview. Live browser fill needs a display + creds + `pip install '.[apply]'` — ships
-  opt-in, fake-driver-tested.
+- **Round-1 relevance/source fixes (committed `6c69bbc`):** broadened `roles` + added a `must_have`
+  stack-anchor gate (`filters._hard_drop_reason`) + wider `exclude` so off-stack roles (Rust/embedded/
+  teacher) drop while backend/systems/ML stay; per-role Adzuna `what` (+`category=it-jobs`) and Jooble
+  queries; Unstop `_opportunity_url` (prefer `seo_url`, fixes 404s); jobspy `html` descriptions +
+  backfill; catch-up now gates on `last_completed_run` (was firing every `serve`). Dropped Naukri from
+  jobspy (`406 recaptcha`). Résumé-tailoring UI (Tailor button + preview) also landed here.
+- **Track D (browser apply agent): DONE (opt-in, fake-driver-tested; live check pending).** `[apply]`
+  extra (browser-use/playwright/cryptography, lazy-imported behind seams). `apply/session.py` =
+  Fernet-encrypted per-domain Playwright `storageState` (`data/sessions/<domain>.enc`, key
+  `JOBAGG_SESSION_KEY`). `apply/driver.py` = `BrowserDriver` Protocol + `FakeDriver` +
+  `PlaywrightDriver`; deterministic ATS selectors → **Set-of-Marks grounding** → generic fallback +
+  résumé upload; review-gate pauses on `while browser.is_connected()` (not `input()`, so it works
+  dashboard-spawned). `apply/detector.py` (JS field-detect, lifted from the Form Controller Agent) +
+  `apply/grounding.py` (`plan_fills`: LLM maps profile values to empty fields, code owns geometry).
+  `apply/ats/{greenhouse,lever,ashby,smartrecruiters}.py` + `detect_ats`. `apply/agent.py` orchestrator
+  refuses if `apply.enabled` is false or `auto_submit` is true; fills then **stops at Submit**.
+  Dashboard: `POST /api/jobs/{uid}/apply` (guarded) spawns `python -m job_aggregator apply <uid>`;
+  Apply button branches on `apply.enabled` (`data-apply-mode`). Surfaced in Config → "Apply agent
+  (Track D)" (`apply.enabled` checkbox + `resume.backend` picker) and `.env.example`
+  (`JOBAGG_SESSION_KEY`). **Never auto-submits.** `resume.backend` default is now `coding_agent`
+  (Claude Code `claude -p`, **no API key**).
+- **Profile editor (this batch): DONE.** `/profile` route + `profile.html` YAML editor;
+  `profile/store.py` `load_profile_text`/`save_profile_text` (validate-before-write so a typo can't
+  corrupt tailoring); nav link in `base.html`. `profile.yaml` is no longer write-once.
 
 A multi-agent adversarial audit (ultracode) found **13 real defects**, all now fixed or documented:
 Tier-B salaries now normalized to INR/month in the runner (were bucketed raw → good jobs dropped);

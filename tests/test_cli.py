@@ -64,6 +64,14 @@ def test_tailor_subcommand_parses() -> None:
     assert callable(args.func)
 
 
+def test_apply_subcommand_parses() -> None:
+    args = cli.build_parser().parse_args(["apply", "abc123", "--db", "/tmp/x.db"])
+    assert args.command == "apply"
+    assert args.uid == "abc123"
+    assert args.llm is False
+    assert callable(args.func)
+
+
 def test_cli_import_is_stdlib_only() -> None:
     # Importing the CLI module must not pull heavy runtime deps into sys.modules.
     code = (

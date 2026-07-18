@@ -27,6 +27,7 @@ from job_aggregator.dashboard.deps import (
     header_context,
 )
 from job_aggregator.errors import ConfigError
+from job_aggregator.profile.store import load_profile_text, save_profile_text
 
 router = APIRouter()
 
@@ -82,6 +83,10 @@ class ConfigForm(BaseModel):
     src_adzuna: bool | None = None
     src_jooble: bool | None = None
     src_remotive: bool | None = None
+
+    # apply agent (Track D) + the résumé/form-fill LLM backend
+    apply_enabled: bool | None = None
+    resume_backend: str | None = None  # "coding_agent" (Claude Code, no key) | "openai_compatible"
 
 
 def _split(value: str) -> list[str]:
@@ -151,6 +156,8 @@ def _apply_form(current: dict[str, Any], f: ConfigForm) -> dict[str, Any]:
     )
     _apply_keywords(merged, f)
     _apply_notify_sources(merged, f)
+    _overlay(merged["apply"], ((f.apply_enabled, "enabled"),))
+    _overlay(merged["resume"], ((f.resume_backend, "backend"),))
     return merged
 
 
@@ -190,3 +197,23 @@ def put_config(
         raise ConfigError("config is invalid", details=details) from exc
     save_config(conn, cfg)
     return {"ok": True, "message": "Saved. Applies on the next run."}
+
+
+@router.get("/profile", response_class=HTMLResponse)
+def profile_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+    scheduler: SchedulerProtocol = Depends(get_scheduler),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> HTMLResponse:
+    """GET /profile — edit the ground-truth profile.yaml (used by tailoring + apply) as raw YAML."""
+    ctx = {**header_context(conn, scheduler), "profile_yaml": load_profile_text()}
+    return templates.TemplateResponse(request, "profile.html", ctx)
+
+
+@router.put("/api/profile")
+def put_profile(profile_yaml: Annotated[str, Form()]) -> dict[str, Any]:
+    """Validate + save the profile YAML. ConfigError (invalid) -> 422 friendly; an invalid profile
+    is never written, so a typo can't silently corrupt a tailored résumé."""
+    save_profile_text(profile_yaml)
+    return {"ok": True, "message": "Profile saved — tailoring and apply use it immediately."}

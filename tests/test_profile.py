@@ -59,3 +59,30 @@ def test_packaged_template_exists_with_section_macros() -> None:
     )
     for token in tokens:
         assert token in tmpl, f"template missing {token!r}"
+
+
+def test_load_profile_text_falls_back_to_example(tmp_path: Path) -> None:
+    from job_aggregator.profile.store import load_profile_text
+
+    text = load_profile_text(tmp_path / "nope.yaml")  # missing -> the committed example template
+    assert "contact" in text
+
+
+def test_save_profile_text_validates_and_writes(tmp_path: Path) -> None:
+    from job_aggregator.paths import PROFILE_EXAMPLE_YAML
+    from job_aggregator.profile.store import load_profile, save_profile_text
+
+    target = tmp_path / "profile.yaml"
+    save_profile_text(PROFILE_EXAMPLE_YAML.read_text(), target)
+    assert target.exists()
+    assert load_profile(target).contact.email  # round-trips as a valid Profile
+
+
+def test_save_profile_text_rejects_invalid(tmp_path: Path) -> None:
+    from job_aggregator.errors import ConfigError
+    from job_aggregator.profile.store import save_profile_text
+
+    target = tmp_path / "profile.yaml"
+    with pytest.raises(ConfigError):
+        save_profile_text("contact: 123", target)  # contact must be an object
+    assert not target.exists()  # an invalid profile is never written
