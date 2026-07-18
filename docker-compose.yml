@@ -1,4 +1,9 @@
-# docker-compose.yml — reboot-durable, single-process deployment of JobAggregator.
+# docker-compose.yml — RETIRED as the primary deployment (2026-07-18).
+#
+# The dashboard now runs host-native (see ./start.sh + deploy/job-aggregator-serve.service):
+# the apply agent must open a browser on the desktop and share the dashboard's DB, which a
+# container can never do. This file is kept as a reference for a FETCH-ONLY remote deployment
+# (aggregation + dashboard, no apply agent). If you use it, disable apply.enabled.
 #
 # Why this exists: `restart: unless-stopped` + Docker's own start-on-boot behavior make the
 # service survive a host reboot. On restart, `serve` auto-initializes the DB and the in-process
@@ -13,7 +18,7 @@
 #   docker compose up -d --build      # start detached, building the image
 #   docker compose logs -f            # tail logs
 #   docker compose ps                 # status + health
-#   docker compose down               # stop + remove container (the named volume PERSISTS)
+#   docker compose down               # stop + remove container (./data on the host PERSISTS)
 #
 # Set JOBAGG_PORT in .env (or your shell) to change the host port; JOBAGG_PUBLIC_URL below then
 # tracks it automatically, so the Telegram run-summary links back to the right host:port.
@@ -28,6 +33,10 @@ services:
     image: job-aggregator
     container_name: job-aggregator
     restart: unless-stopped
+    # Run as the HOST user (not the image's uid-10001 app user) so the bind-mounted ./data and
+    # profile.yaml stay owned/editable by you, and so the host-side apply agent CLI shares the
+    # same files. Override via JOBAGG_UID/JOBAGG_GID in .env if your uid isn't 1000.
+    user: "${JOBAGG_UID:-1000}:${JOBAGG_GID:-1000}"
     ports:
       - "${JOBAGG_PORT:-8770}:8000"
     env_file:
@@ -37,8 +46,15 @@ services:
       # port; override in .env if you reach the dashboard by a hostname/IP other than localhost.
       JOBAGG_PUBLIC_URL: "${JOBAGG_PUBLIC_URL:-http://localhost:${JOBAGG_PORT:-8770}}"
     volumes:
-      # Named volume: the DB, generated feed, and logs (all under /data) survive `down`/rebuild.
-      - jobagg-data:/data
+      # BIND MOUNT (was a named volume): the DB/feed/résumés live in ./data on the host, so the
+      # dashboard container and the host-run apply agent (`python -m job_aggregator apply <uid>`)
+      # see the SAME database — the apply flow needs your desktop, the aggregation doesn't.
+      # `:z` = SELinux relabel for Fedora. (The old jobagg-data named volume is untouched; see
+      # TROUBLESHOOTING.md "Migrating off the named volume".)
+      - ./data:/data:z
+      # The personal profile.yaml is .dockerignore'd out of the image (privacy + rebuild-loss);
+      # mount it instead so the /profile editor and résumé tailoring keep working in Docker.
+      - ./profile.yaml:/app/profile.yaml:z
     healthcheck:
       # Liveness = the dashboard answers. urllib is stdlib in the python:3.11-slim base image;
       # `serve` binds 0.0.0.0:8000 inside the container regardless of the published host port.
@@ -51,6 +67,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-
-volumes:
-  jobagg-data:

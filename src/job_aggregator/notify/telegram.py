@@ -7,9 +7,11 @@ HTML-escaped. Missing token/chat_id -> dry-run log (no I/O). Any failure is logg
 from __future__ import annotations
 
 import html
+import ipaddress
 import logging
 import os
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import httpx
 
@@ -64,9 +66,28 @@ def build_digest(jobs: list[Job], *, max_jobs: int = MAX_TELEGRAM_JOBS) -> str:
     return text
 
 
+def _is_local_url(url: str) -> bool:
+    """True for addresses Telegram cannot link to anyway (localhost / private-range hosts).
+
+    Telegram's API strips (or rejects) anchor entities whose host is localhost or a LAN IP,
+    which rendered the old '<a href="http://localhost:8770">Open dashboard</a>' as dead text
+    with no visible address — the user saw a summary "without the link". For such URLs the
+    address must be shown as plain text instead.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    if host in ("localhost", "") or host.endswith(".local"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_private or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False  # a real hostname — Telegram can link it
+
+
 def build_run_summary(summary: RunSummary, dashboard_url: str) -> str:
     """Render the end-of-run summary: status glyph, the count line, the source ok/err tally, any
-    failed sources (capped), and a tappable dashboard link. Truncated to the message limit."""
+    failed sources (capped), and the dashboard address — a tappable anchor for public hosts, a
+    plain-text (copyable) URL for localhost/LAN ones (see _is_local_url). Truncated to the
+    message limit."""
     icon = STATUS_ICON.get(summary.status, "⚪")
     lines = [
         f"{icon} <b>Run #{summary.run_id}</b> [{_esc(summary.status)}] · {_esc(summary.trigger)}",
@@ -83,7 +104,10 @@ def build_run_summary(summary: RunSummary, dashboard_url: str) -> str:
         if extra > 0:
             failed += f" +{extra} more"
         lines.append(f"failed: {failed}")
-    lines.append(f'<a href="{_esc_attr(dashboard_url)}">Open dashboard →</a>')
+    if _is_local_url(dashboard_url):
+        lines.append(f"Dashboard: {_esc(dashboard_url)}")
+    else:
+        lines.append(f'<a href="{_esc_attr(dashboard_url)}">Open dashboard →</a>')
     text = "\n".join(lines)
     if len(text) > TELEGRAM_MESSAGE_LIMIT:
         text = text[: TELEGRAM_MESSAGE_LIMIT - 1] + "…"

@@ -1,0 +1,36 @@
+# job-aggregator-serve.service — systemd USER unit for the host-native dashboard.
+#
+# Replaces the retired Docker deployment (a container can never host the apply agent's
+# headful browser). Runs start.sh: dashboard + in-process daily scheduler on :8770, with
+# startup catch-up handling reboots/sleep the same way the container did.
+#
+# Install (as your user, no sudo):
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/job-aggregator-serve.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now job-aggregator-serve
+#   loginctl enable-linger "$USER"     # required for start at BOOT (not merely at login)
+# Logs:  journalctl --user -u job-aggregator-serve -e
+#
+# ── ONE scheduler only ────────────────────────────────────────────────────────────────
+# This serve owns the daily fetch. Do NOT also enable deploy/job-aggregator.timer unless
+# you set JOBAGG_DISABLE_SCHEDULER=1 below — otherwise every source is fetched twice.
+
+[Unit]
+Description=JobAggregator dashboard + daily scheduler (host-native, port 8770)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=/home/SammyUrfen/Codes/job aggregator
+# ExecStart word-splits on spaces; the quotes keep the space in the repo path intact.
+ExecStart="/home/SammyUrfen/Codes/job aggregator/start.sh"
+# .env is ALSO loaded by the app itself (python-dotenv); this line only matters for vars
+# the script reads before python starts (JOBAGG_PORT / JOBAGG_PUBLIC_URL overrides).
+EnvironmentFile=-/home/SammyUrfen/Codes/job aggregator/.env
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

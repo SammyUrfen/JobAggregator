@@ -138,7 +138,14 @@ def test_build_run_summary_has_counts_status_and_link() -> None:
     assert "new 3" in text and "updated 4" in text and "expired 1" in text and "filtered 40" in text
     assert "sources ok 5 / err 2" in text
     assert "naukri" in text  # failed source surfaced
-    assert 'href="http://localhost:8770/"' in text
+    # localhost: Telegram strips anchors for local hosts, so the address must be VISIBLE text
+    assert "Dashboard: http://localhost:8770/" in text
+    assert "href" not in text.splitlines()[-1]
+
+
+def test_build_run_summary_public_host_gets_anchor() -> None:
+    text = build_run_summary(_summary(), "https://jobs.example.com/")
+    assert 'href="https://jobs.example.com/"' in text  # public hosts keep the tappable link
 
 
 def test_build_run_summary_caps_failed_sources() -> None:

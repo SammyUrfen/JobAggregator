@@ -26,6 +26,9 @@ venv/
 # ── Secrets — never bake into an image layer ──
 .env
 
+# ── Personal résumé data — bind-mounted at runtime (docker-compose), never an image layer ──
+profile.yaml
+
 # ── Runtime data (host DB, generated feed, logs) — the container uses its own /data volume ──
 data/
 
