@@ -32,3 +32,8 @@ data/*
 *.swp
 .DS_Store
 .serena/
+
+# ── Scratch / verification artifacts (Playwright MCP snapshots, throwaway screenshots) ──
+.playwright-mcp/
+/*.png
+/*.jpg
