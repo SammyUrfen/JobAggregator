@@ -124,10 +124,32 @@ beyond the first 6 are not queried (UI hint added).
   internships are open. One-off cleanup soft-deleted 49 closed stored rows (12 confirmed open
   kept). Internshala never lists closed posts (verified); Adzuna has no such field (documented).
 
-**Remaining known-undone:** the agentic apply hasn't been driven HEADFULLY by the user yet (the
-end-to-end runs were headless smokes with fake data); LinkedIn Easy Apply with real cookies is
-untested against a real submission flow; dashboard auth / cross-process run-lock / fuzzy-dedup
-remain documented limitations.
+**Apply hardening round (2026-07-19, from a real user run):** three fixes, gate 485 passed.
+- **Zen cookie crash (`3ea250d`):** apply died at `ctx.add_cookies` — Zen stores cookie expiry
+  in MILLISECONDS (stock Firefox uses seconds), so passed as seconds it was year ~58,000 and
+  Playwright rejected the jar, killing the browser before any window painted. Fix:
+  `cookies._expires_seconds` magnitude-detects ms and divides; `add_cookies` is wrapped
+  try/except (a bad cookie degrades to logged-out, never fatal); the apply-alert log tail now
+  greps bottom-up for the real error line (a harmless startup print sat below the traceback).
+- **Kill switch (`1e06842`):** there was NO way to stop a stuck agent — and the review-pause
+  loop keeps the process alive, so haywire runs piled up as orphans (found 3 live + chromium
+  windows in the user's session; they shared serve's process group because the old spawn used a
+  bare Popen, so group-kill was unsafe). Fix: `apply/procs.py` (register/live/stop_all with a
+  /proc cmdline identity guard against PID reuse); `_launch_apply` now spawns with
+  `start_new_session=True` (own process group) + registers the PID; `GET /api/apply/status`
+  (drives visibility) + `POST /api/apply/stop` (SIGTERM→grace→SIGKILL the whole tree); header
+  **⏹ Stop apply** button polled every 4s (survives reloads/closed modal). LIVE-VERIFIED: real
+  internshala apply → status running:1 → Stop → 7-proc tree (python+claude+npx+chromium) all
+  gone, service survived, status running:0.
+- **LinkedIn logout (known limitation, prompt-hardened):** LinkedIn's anti-bot invalidates the
+  imported session on the Easy-Apply click and bounces to a sign-in wall; the agent now STOPS
+  and waits for a manual login instead of thrashing (thrashing logged it out further). ATS
+  boards + Internshala/Unstop don't do this and are the reliable path.
+
+**Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
+by the user (headless smokes + a real internshala launch that was Stop-tested); LinkedIn Easy
+Apply remains best-effort (anti-bot); dashboard auth / cross-process run-lock / fuzzy-dedup remain
+documented limitations.
 
 **Auto-apply extension (post-v1) — in progress.** Design + verified research in
 `docs/auto_apply_design.md`. Locked decisions: fill→**you review→you submit** (never blind
