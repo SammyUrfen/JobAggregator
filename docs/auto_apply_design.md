@@ -1,5 +1,13 @@
 # Auto-Apply extension — design & feasibility (research-grounded)
 
+> **SUPERSEDED IN PART (2026-07-18): Track D v2 replaced one-shot Set-of-Marks grounding**
+> **with the AGENTIC engine** — a `claude -p` session drives the visible Chromium via
+> @playwright/mcp attached over CDP (`apply/agentic.py`), imports the posting domain's login
+> cookies from the user's Zen profile (`apply/cookies.py`), clicks through Apply/Easy Apply
+> to reach the real form, waits with the human through captcha/login walls, and still NEVER
+> submits. The deterministic selector fill below remains as the fallback engine
+> (`apply.engine: deterministic`).
+
 > Status: **Tracks A–D COMPLETE (built, gate-green, fake-driver-tested).** Grounded in a verified
 > deep-research pass (2026-07-16, 25 sources, 20 confirmed / 5 refuted claims). This is the
 > "generate → agent-fills → human-reviews → human-submits" architecture, plus the reboot-durable

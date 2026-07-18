@@ -31,16 +31,103 @@ a personal laptop. Fully Python. Learning/portfolio project — built from scrat
   agent). Read it before touching Track A–D work.
 
 ## Current status
-**v1 COMPLETE (Phases 0–9) + auto-apply Tracks A–D ALL done.** Full gate green:
-`ruff check .`, `ruff format --check .`, `mypy src`, `pytest` (**372 passed** / 0 skipped; coverage
-**90.16%**, hard gate 85%). Verified live: a real cycle writes+dedups jobs and emits a valid Atom
-`feed.xml`; the dashboard serves all routes (incl. `/profile` YAML editor); résumé tailoring
-produces a real PDF; a fresh Docker cycle kept ~129 relevant jobs (the earlier "only 1 job" was a
-**stale image** — always `docker compose up --build`, not the filter). `profile.yaml` is git-ignored
-(personal). **The ONLY un-done piece is running the Track D apply agent against a real browser** —
-see `docs/auto_apply_design.md` → "Live validation" (Step 6): needs a display +
-`pip install -e '.[apply]'` + `JOBAGG_SESSION_KEY`. **Next session: `git log` (tree should be clean),
-then either do the live Track D check or move to new work.**
+**v1 COMPLETE (Phases 0–9) + auto-apply Tracks A–D done + INTERNSHIP-FIRST OVERHAUL (2026-07-18).**
+Full gate green: `ruff check .`, `ruff format --check .`, `mypy src`, `pytest` (**445 passed** / 0
+skipped; coverage **90.6%**, hard gate 85%). Live-verified A/B the same day: the old config kept
+**107 jobs / 5 internships**; the overhauled pipeline kept **344 / 262 internships** (internshala
+147, adzuna 60, unstop 48) with zero off-domain leaks in spot checks.
+
+**Internship-first overhaul (this session; diagnosed by a 5-agent workflow replaying the real
+pipeline live):**
+- **Root causes found & fixed:** Unstop NEVER sent `search_terms` to its API (un-targeted
+  firehose: 300 fetched → 2 kept) → now sends `searchTerm` per (opportunity × term), maps
+  `details`/`required_skills`/`workfunction` as description, dedupes by id. Adzuna/Jooble only
+  queried role phrases (0 intern targeting) → Adzuna adds a `title_only=intern & max_days_old=35`
+  walk (266 fresh IT internships verified), Jooble rides `keywords.intern_queries`. jobspy never
+  passed `job_type` → now `job_type=internship` (Indeed drops `hours_old` — jobspy can't combine
+  them; LinkedIn composes) + `linkedin_fetch_description=true` (rows had NO description → gates
+  ran title-only). `is_remote` seed → false (it strangled LinkedIn intern yield). Jobicy disabled
+  (0 internships + no India geo server-side, verified). Himalayas now maps its description.
+- **NEW source: Internshala** (`sources/internshala.py`, bs4 explicit dep) — listing-page HTML
+  per filter slug (7 seeded; research.md's dead-end note was stale, pages return 200), stipend
+  native INR/month, posted-ago→date, slug surfaced as description for the must_have gate; a
+  redesign degrades to suspicious-empty, never a crash.
+- **Pipeline:** `Job.is_internship` (title regex; schema **v2 migration** + backfill — bump
+  `SCHEMA_VERSION` pattern in storage/db.py) drives: +25 score boost, relaxed role gate (stack
+  anchor alone qualifies an intern posting), exemption from the new years-of-experience drop
+  (`keywords.max_experience_years`, default 2, token+proximity regex, 0=off), and its own stipend
+  floor `salary.min_internship` (default 0 — the 30k remote floor was dropping real SDE-intern
+  posts). Title excludes extended (sr/ii/iii/iv/sde-2/frontend/sap/…); must_have gained
+  java/spring/sde/software development. Dashboard: **Internships** chip (`?intern=1`) + green
+  `Intern` badge; config UI exposes the new knobs plus bonus/level_required (were unrendered).
+- **Stale-deletion correctness fix (audit-found):** windowed fetches (page caps/results_wanted —
+  adzuna/jooble/jobspy/capped walks) were silently deleting live jobs that drifted past page N.
+  `paginate_until_empty` now returns `(items, exhausted)`; `SourceResult.exhaustive` flows to
+  `expire_stale`, where windowed sources retire jobs by POSTING AGE
+  (`schedule.windowed_retire_days`, default 30) instead of absence.
+
+**Apply-button fix (the "said it will open a browser but never did" bug):** proven chain — the
+dashboard ran in Docker, the route spawned the agent INSIDE the container (first wall: no LaTeX;
+then no playwright/chromium/display) while unconditionally claiming "a browser window is opening"
+and marking the job applied. Now: `_apply_preflight` (display/[apply]-extra/LaTeX checks) returns
+honest, actionable refusals incl. the exact host command; the spawn is watched ~1.5s for instant
+death (stderr tail surfaced from `data/apply_last.log`); **`applied` is set by the CLI after the
+fill completes**, not on launch; `save_state` degrades gracefully without `JOBAGG_SESSION_KEY`
+(key now generated in `.env`). The user's Zen browser was never relevant — Playwright drives its
+own Chromium. **Deployment reshaped so the flow actually works:** docker-compose now bind-mounts
+`./data:/data:z` (named volume `jobagg-data` retired but untouched; DB migrated with backups in
+`data/backups/`) and `./profile.yaml` (was BAKED into the image — privacy leak, now
+.dockerignore'd), runs as `JOBAGG_UID:GID` (default 1000). Dashboard (Docker) and host apply CLI
+share one DB: click Apply → honest message → run the printed command on the host.
+
+**Other audit fixes:** crashed runs no longer masquerade as "run in progress" (trigger_now
+returns run_id | "busy" | "failed"); résumé rewrite numbering-strip no longer amputates bullets
+that LEAD with a metric ("91 Catch2 tests…" → "Catch2 tests…") + new flag when a rewrite DROPS a
+metric; profile save is atomic (tmp+replace, bind-mount fallback); adzuna/jooble log which roles
+beyond the first 6 are not queried (UI hint added).
+
+**EVENING ROUND (same day): Docker retired + agentic apply (Track D v2).** Gate: **472 passed**,
+90.67% cov, ruff+mypy clean.
+- **Deployment is now HOST-NATIVE:** `./start.sh` (env-python absolute path, PATH for
+  claude/npx/pdflatex, display fallback) run by systemd USER unit `job-aggregator-serve`
+  (enabled + linger → starts at boot; `systemctl --user restart job-aggregator-serve` after code
+  changes). Docker compose/image retired (files kept as fetch-only reference; jobagg-data volume
+  untouched). Dashboard on :8770.
+- **Telegram link fix:** Telegram strips anchors for localhost/LAN hosts — `build_run_summary`
+  now renders local dashboard URLs as VISIBLE plain text (`_is_local_url`); public hosts keep the
+  anchor. Stored config dashboard_url → :8770; verified with a real send.
+- **Agentic apply (`apply/agentic.py` + `apply/cookies.py`):** `AgenticSession` satisfies the
+  BrowserDriver seam, so `apply_to_job` is untouched. Flow: headful Chromium launched with a CDP
+  port + the posting domain's cookies imported from the user's Zen profile
+  (`~/.config/zen/*/cookies.sqlite`, Firefox format, copy-then-read, values never logged) →
+  `claude -p` with @playwright/mcp@0.0.78 attached via `--cdp-endpoint` drives THAT window:
+  reaches the form from the posting (Apply/Easy Apply/wizards), fills from ApplicationFields,
+  uploads the résumé, NEVER submits (prompt HARD RULES + human review pause), and on a
+  captcha/login wall it POLLS while the human solves it in the same window. Verified claude flags
+  (v2.1.214): `--mcp-config` (needs `"type":"stdio"`) + `--strict-mcp-config` + `--allowedTools
+  mcp__browser__*` + `--disallowedTools Bash,…` (least privilege); NO `--max-turns` (doesn't
+  exist); `--output-format stream-json --verbose` STREAMED to `data/apply_agent.log` (tail -f
+  while it runs — plain text buffered until exit and made slow look hung);
+  `extract_result_text` pulls the final RESULT line. `apply.agent_model` default **sonnet**
+  (inheriting the user's opus-1M default was slow/quota-hungry). Claude subprocess runs with
+  **cwd=data_dir()** — @playwright/mcp restricts `browser_file_upload` to its workspace root
+  (cwd), and the résumé lives under data/resumes (smoke-proven: outside-cwd = denied).
+  **LIVE-VERIFIED end-to-end**: real GitLab Greenhouse posting → agent reached the form, filled
+  contact fields, refused to invent answers for required questions, did not submit; upload smoke
+  green after the cwd fix. Config: `apply.{engine,use_browser_cookies,browser_cookie_db,
+  agent_timeout_s,agent_model}` + config-UI picker; deterministic engine kept as fallback (auto
+  when claude/npx missing). Zen cookie jars verified present: linkedin 25, naukri 9, unstop 5.
+- **Unstop closed-application fix:** `status` stays "LIVE"/`regn_open` stays 1 on CLOSED posts —
+  the truthful field is `regnRequirements.reg_status` ("FINISHED" = the site's "Application
+  Closed"; page-verified 5/5). Fetch now sends `oppstatus=open` (server-side equivalent,
+  ~12× fewer pages) + a reg_status guard in `_map` (fail-open). Measured: only ~1-7% of unstop
+  internships are open. One-off cleanup soft-deleted 49 closed stored rows (12 confirmed open
+  kept). Internshala never lists closed posts (verified); Adzuna has no such field (documented).
+
+**Remaining known-undone:** the agentic apply hasn't been driven HEADFULLY by the user yet (the
+end-to-end runs were headless smokes with fake data); LinkedIn Easy Apply with real cookies is
+untested against a real submission flow; dashboard auth / cross-process run-lock / fuzzy-dedup
+remain documented limitations.
 
 **Auto-apply extension (post-v1) — in progress.** Design + verified research in
 `docs/auto_apply_design.md`. Locked decisions: fill→**you review→you submit** (never blind

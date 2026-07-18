@@ -50,6 +50,29 @@ always quote it in shells.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `run` prints `0 new` but the dashboard shows rows | Nothing is broken — your filters rejected every fetched posting before upsert. | Loosen the filters in `/config`: `require_level`/`roles`, `locations`, and the salary floors are strict by default. Existing rows in the dashboard are from earlier, laxer runs. |
+| Almost no internships in the feed | Pre-2026-07-18 behavior: Unstop ignored `search_terms` (generic firehose), Adzuna/Jooble queried only role phrases, jobspy never passed `job_type`, and intern stipends died on the full-time salary floor. | Fixed: Unstop sends `searchTerm`, Adzuna adds a `title_only=intern` walk, jobspy passes `job_type=internship` (+ LinkedIn descriptions), Internshala is a first-class source, and internships use `salary.min_internship` (default 0) + a score boost. Use the **Internships** filter chip on the dashboard. |
+| A good job disappeared after a few days though it's still live | Old absence-based expiry: page-capped ("windowed") fetches can't see everything, and unseen used to mean stale→deleted. | Fixed: windowed sources (adzuna/jooble/jobspy + capped unstop/internshala walks) retire jobs by **posting age** (`schedule.windowed_retire_days`, default 30), not absence. Exhaustive sources (ATS boards) keep absence-based expiry. |
+| A relevant posting was dropped as `experience:<N>y` | The description demands more years than `keywords.max_experience_years` (default 2). Rarely, a company blurb ("10+ years serving clients") false-matches. | Raise `max_experience_years` in `/config`, or set it to 0 to disable the gate. Internships are always exempt. |
+
+## Apply agent (Track D)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The agent lands on the posting, not the form ("it has Apply / Easy Apply / Quick Apply") | Job URLs point at POSTINGS; the form is behind the apply button, sometimes a wizard/login. The old deterministic fill couldn't navigate that. | Fixed by the **agentic engine** (`apply.engine: agentic`, default): a Claude session drives the visible Chromium via the playwright MCP — clicks through to the form, fills it, attaches the résumé, and never submits. Watch progress live: `tail -f data/apply_agent.log`. |
+| Easy/Quick Apply demands login though I'm logged in, in Zen | The agent's Chromium is a separate browser with an empty cookie jar. | Fixed: `apply.use_browser_cookies` (default on) imports the posting site's cookies from your Zen profile (read-only copy of `cookies.sqlite`, only that domain's rows). No Zen cookies for the site → the agent pauses at the login wall for you, then continues; that login is also saved (encrypted) for next time. |
+| A captcha appeared mid-apply | Sites challenge automated-looking sessions. | By design the agent **waits**: solve the captcha in the very window it is driving; it polls (~15s intervals, up to ~10 min) and continues. The session's hard bound is `apply.agent_timeout_s` (default 900s). |
+| Apply session times out / takes very long | Big multi-step forms genuinely take minutes; a too-small `agent_timeout_s` kills it mid-way. Also `apply.agent_model: ""` inherits your claude default — a flagship model is slow for this. | Keep `agent_model: sonnet` (default), raise `agent_timeout_s` if needed, and check `data/apply_agent.log` — it streams while the agent works, so "slow but progressing" and "stuck" look different. On timeout the browser STAYS open; finish by hand. |
+| Apply button says it cannot open a browser here | serve is running in a headless context (no DISPLAY/WAYLAND_DISPLAY). | Run the dashboard on your desktop (`./start.sh` or the systemd user unit — a login session has a display). The refusal message includes the exact fallback CLI command. |
+| The agent opens Chromium, not my browser (Zen) | Expected — Playwright drives its own bundled Chromium. Your default browser is only used by the plain Apply↗ button (agent off). | Nothing to fix. With `use_browser_cookies` on you're already logged in inside that Chromium for the posting's site. |
+| Apply finished but says `session not saved` | `JOBAGG_SESSION_KEY` missing/invalid — session persistence is optional and degrades gracefully (the fill itself is unaffected). | Generate once: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` → put it in `.env`, keep it stable. |
+
+## Docker deployment (RETIRED 2026-07-18 — host-native `start.sh` is the deployment now)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| After 2026-07-18 the container sees an empty/old DB | Deployment moved from the `jobagg-data` named volume to a bind mount of `./data` (so the host apply CLI and the dashboard share one DB). Compose no longer mounts the old volume. | The volume's DB was copied to `./data/jobs.db` during the migration (originals kept in `data/backups/` and in the untouched `jobagg-data` volume). To re-extract manually: `docker run --rm -v jobaggregator_jobagg-data:/data alpine cat /data/jobs.db > data/jobs.db`. |
+| Container can't write `./data` / profile edits fail | The container runs as `JOBAGG_UID:JOBAGG_GID` (default 1000:1000) to match host file ownership; a different host uid breaks writes. | Set `JOBAGG_UID`/`JOBAGG_GID` in `.env` to your `id -u`/`id -g` and `docker compose up -d`. |
+| Profile edits vanish after `up --build` (pre-fix) | `profile.yaml` used to be baked into the image (also a privacy leak — personal résumé data in image layers). | Fixed: `.dockerignore` excludes it and compose bind-mounts `./profile.yaml` into the container, so `/profile` edits land on the host file and survive rebuilds. |
 
 ## Security posture
 
