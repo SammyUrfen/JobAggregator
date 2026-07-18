@@ -89,12 +89,19 @@ a:hover { text-decoration: underline; }
   gap: var(--sp-2); padding-top: var(--sp-2);
   border-top: var(--border-w) solid var(--border);
 }
-.jc-posted { font-size: 11px; }
-.jc-actions { display: inline-flex; gap: 4px; }
+/* min-width:0 + ellipsis: however long the date text gets, it shrinks — the action buttons
+   must never be pushed past the card edge. */
+.jc-posted {
+  font-size: 11px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.jc-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
 
 /* badges */
 .badge { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-button); }
 .badge.remote { background: var(--accent); color: var(--accent-contrast); }
+/* Internship: the flag the whole feed is tuned for — solid ok-green so it reads first. */
+.badge.intern { background: var(--ok); color: var(--accent-contrast); font-weight: 600; }
 .salary-pass { color: var(--ok); font-family: var(--font-mono); }
 .salary-unknown { color: var(--warn); font-family: var(--font-mono); }
 

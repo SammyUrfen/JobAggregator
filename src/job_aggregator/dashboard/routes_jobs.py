@@ -9,15 +9,19 @@ return the updated card partial.
 
 from __future__ import annotations
 
+import contextlib
 import html
+import importlib.util
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode, urlparse
 
@@ -36,7 +40,7 @@ from job_aggregator.dashboard.deps import (
     header_context,
 )
 from job_aggregator.errors import NotFoundError, RenderError
-from job_aggregator.paths import default_db_path, resumes_dir
+from job_aggregator.paths import data_dir, default_db_path, resumes_dir
 from job_aggregator.profile.store import load_profile
 from job_aggregator.resume.render import compile_pdf, render_latex
 from job_aggregator.resume.tailor import tailor_resume
@@ -254,6 +258,7 @@ class JobQuery:
     show_hidden: bool = False
     applied: bool = False
     bookmarked: bool = False
+    intern: bool = False  # internships only (jobs.is_internship = 1)
     sort: str = "score"
     page: int = 1
 
@@ -292,6 +297,7 @@ def _parse_job_query(params: QueryParams) -> JobQuery:
         show_hidden=params.get("show_hidden") in _TRUTHY,
         applied=params.get("applied") in _TRUTHY,
         bookmarked=params.get("bookmarked") in _TRUTHY,
+        intern=params.get("intern") in _TRUTHY,
         sort=sort,
         page=page,
     )
@@ -324,6 +330,8 @@ def _build_where(query: JobQuery) -> tuple[str, list[Any]]:
         clauses.append("applied = 1")
     if query.bookmarked:
         clauses.append("bookmarked = 1")
+    if query.intern:
+        clauses.append("is_internship = 1")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     return where, params
 
@@ -464,10 +472,65 @@ def job_resume_pdf(uid: str) -> FileResponse:
     return FileResponse(path, media_type="application/pdf", filename=f"resume-{uid[:8]}.pdf")
 
 
-def _launch_apply(uid: str, db_path: str) -> None:  # pragma: no cover - spawns a local process
+# How long to watch the spawned apply process for an instant death before reporting success.
+# Import/config errors surface within ~1s; a healthy agent is still tailoring/launching then.
+_APPLY_SPAWN_GRACE_S = 1.5
+# Where the spawned agent's output lands so an early death has a readable reason.
+_APPLY_LOG_NAME = "apply_last.log"
+
+
+def _apply_preflight(uid: str) -> str | None:
+    """The reason this serve process cannot run the headful apply agent, or None if it can.
+
+    Every check returns a SPECIFIC, actionable message — the old route answered "a browser
+    window is opening" unconditionally while the spawned child died instantly inside Docker
+    (no display, no [apply] extra, no LaTeX), which is exactly the lie the user hit.
+    """
+    host_cmd = f"python -m job_aggregator apply {uid}"
+    if Path("/.dockerenv").exists() or not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        return (
+            "This dashboard runs in Docker/headless, so it cannot open a browser window here. "
+            f"Run the agent on your desktop instead:  {host_cmd}  (repo root, conda env "
+            "job-aggregator; it opens its OWN Chromium window — your default browser isn't used)."
+        )
+    if importlib.util.find_spec("playwright") is None or (
+        importlib.util.find_spec("cryptography") is None
+    ):
+        return (
+            "The apply extra is not installed in this environment. Run: "
+            "pip install -e '.[apply]' && playwright install chromium — then retry."
+        )
+    if not (shutil.which("tectonic") or shutil.which("pdflatex")):
+        return (
+            "No LaTeX engine found (tectonic or pdflatex) — the agent tailors a résumé PDF "
+            "before filling. Install tectonic (or texlive) and retry."
+        )
+    return None
+
+
+def _launch_apply(uid: str, db_path: str) -> subprocess.Popen[bytes]:
     """Spawn `job-aggregator apply <uid>` locally (opens a headful browser on the user's desktop).
-    Detached so the route returns immediately; the browser stays open for review + submit."""
-    subprocess.Popen([sys.executable, "-m", "job_aggregator", "apply", uid, "--db", db_path])
+    Output is captured to data/apply_last.log so an early death has a readable reason; the
+    process itself stays detached — the browser outlives this request for review + submit."""
+    log_path = data_dir() / _APPLY_LOG_NAME
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = open(log_path, "wb")  # noqa: SIM115 - handed to Popen; closed with the child
+    return subprocess.Popen(
+        [sys.executable, "-m", "job_aggregator", "apply", uid, "--db", db_path],
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+    )
+
+
+def _apply_log_tail() -> str:
+    """The last line of the spawned agent's log — the CLI prints its error envelope there."""
+    try:
+        lines = (data_dir() / _APPLY_LOG_NAME).read_text(errors="replace").strip().splitlines()
+        return lines[-1] if lines else "no output captured"
+    except OSError:
+        return "no output captured"
 
 
 @router.post("/api/jobs/{uid}/apply")
@@ -476,9 +539,10 @@ def job_apply(
     conn: sqlite3.Connection = Depends(get_conn),
     cfg: Config = Depends(get_config),
 ) -> dict[str, Any]:
-    """Launch the local headful apply agent for this job. Guarded by apply.enabled; only works when
-    serve runs on your desktop (needs a display) with the `[apply]` extra. The uid must match a
-    stored job, and the subprocess uses list-argv (no shell), so it can't inject."""
+    """Launch the local headful apply agent for this job. Guarded by apply.enabled plus a
+    preflight (display, [apply] extra, LaTeX engine) so the answer is honest; only works when
+    serve runs on your desktop. The uid must match a stored job, and the subprocess uses
+    list-argv (no shell), so it can't inject."""
     if conn.execute("SELECT 1 FROM jobs WHERE job_uid = ?", (uid,)).fetchone() is None:
         raise NotFoundError("job not found", details={"uid": uid})
     if not cfg.apply.enabled:
@@ -487,5 +551,18 @@ def job_apply(
             "message": "Apply agent is off. Set apply.enabled: true, install '.[apply]' + "
             "`playwright install chromium`, and run serve on your desktop.",
         }
-    _launch_apply(uid, os.environ.get("JOBAGG_DB") or str(default_db_path()))
-    return {"ok": True, "message": "A browser window is opening — review, submit, then close it."}
+    reason = _apply_preflight(uid)
+    if reason is not None:
+        return {"ok": False, "message": reason}
+    proc = _launch_apply(uid, os.environ.get("JOBAGG_DB") or str(default_db_path()))
+    # Catch an instant death (bad profile, missing job data) instead of lying; still running
+    # after the grace period = healthy launch.
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=_APPLY_SPAWN_GRACE_S)
+    if proc.returncode is not None and proc.returncode != 0:
+        return {"ok": False, "message": f"Apply agent exited immediately: {_apply_log_tail()}"}
+    return {
+        "ok": True,
+        "message": "Chromium is opening with the form pre-filled — review, submit it yourself, "
+        "then close that window. (The agent marks the job applied when the fill completes.)",
+    }

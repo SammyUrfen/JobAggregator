@@ -175,7 +175,14 @@ def _rewrite_project(
         f"- {b}" for b in project.bullets
     )
     raw = backend.complete(system, user, temperature=temperature)
-    lines = [re.sub(r"^[-*•\d.\s]+", "", ln).strip() for ln in raw.splitlines() if ln.strip()]
+    # Strip only true LIST numbering ("- ", "* ", "3. ", "12) ") — digits need the dot/bracket
+    # + space. The old greedy [-*•\d.\s]+ amputated bullets that LEAD with a metric ("91 Catch2
+    # tests…" -> "Catch2 tests…", "2.7x…" -> "x…"), silently losing facts.
+    lines = [
+        re.sub(r"^\s*(?:[-*•]|\d{1,3}[.)])\s+", "", ln).strip()
+        for ln in raw.splitlines()
+        if ln.strip()
+    ]
 
     source_numbers: set[str] = set()
     for bullet in project.bullets:
@@ -187,6 +194,14 @@ def _rewrite_project(
         candidate = lines[i] if i < len(lines) else ""
         if candidate and _numbers(candidate) <= source_numbers:
             kept.append(candidate)
+            # The guard rejects ADDED numbers; also surface LOST ones — a rewrite that drops a
+            # metric passes set-containment but silently weakens the bullet.
+            lost = _numbers(original) - _numbers(candidate)
+            if lost:
+                flags.append(
+                    f"{project.name}: rewrite dropped metric(s) {sorted(lost)} — review bullet "
+                    f"{i + 1}"
+                )
         else:
             kept.append(original)  # fall back to the truthful original
             if candidate:

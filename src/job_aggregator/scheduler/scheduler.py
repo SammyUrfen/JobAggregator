@@ -130,8 +130,11 @@ class JobScheduler:
             return True
         return (now - last_completed) >= threshold
 
-    def trigger_now(self, trigger: str = TRIGGER_MANUAL) -> int | None:
-        """Run synchronously now; returns the run_id, or None if a run is already in progress."""
+    def trigger_now(self, trigger: str = TRIGGER_MANUAL) -> int | str:
+        """Run synchronously now. Returns the run_id, or the sentinel "busy" (another run holds
+        the lock / an active DB run exists) or "failed" (the cycle raised — details in the log).
+        Distinct sentinels because the dashboard must not report a CRASHED run as "already in
+        progress" (that alias sent the user chasing a phantom run)."""
         return self._run_locked(trigger)
 
     def _submit_async(self, trigger: str) -> None:
@@ -147,27 +150,27 @@ class JobScheduler:
             misfire_grace_time=None,
         )
 
-    def _run_locked(self, trigger: str) -> int | None:
+    def _run_locked(self, trigger: str) -> int | str:
         from job_aggregator.config.store import load_effective_config
         from job_aggregator.pipeline.runner import run_cycle
         from job_aggregator.storage import runs_repo
 
         if not self._lock.acquire(blocking=False):
             log.warning("a run is already in progress in this process; skipping %s", trigger)
-            return None
+            return "busy"
         conn: sqlite3.Connection | None = None
         try:
             conn = cast("sqlite3.Connection", self._connect_fn())
             if runs_repo.current_run(conn) is not None:
                 log.warning("an active run exists in the DB; skipping %s", trigger)
-                return None
+                return "busy"
             cfg = load_effective_config(conn)
             summary = run_cycle(conn, cfg, self._clock, trigger=trigger)
             log.info("run finished (%s): %s", trigger, summary)
             return summary.run_id
         except Exception:
             log.exception("run cycle raised for trigger=%s", trigger)
-            return None
+            return "failed"
         finally:
             if conn is not None:
                 conn.close()

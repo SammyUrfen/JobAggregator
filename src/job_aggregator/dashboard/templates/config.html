@@ -41,6 +41,12 @@
       <span class="field-error" data-field-error="salary.min_in_office"></span>
     </div>
     <div class="field">
+      <label for="salary_min_internship">min_internship (INR/month; 0 = never drop an internship on stipend)</label>
+      <input type="number" id="salary_min_internship" name="salary_min_internship"
+             value="{{ config.salary.min_internship }}">
+      <span class="field-error" data-field-error="salary.min_internship"></span>
+    </div>
+    <div class="field">
       <label for="salary_on_missing">on_missing</label>
       <select id="salary_on_missing" name="salary_on_missing">
         <option value="keep_and_flag" {% if config.salary.on_missing == 'keep_and_flag' %}selected{% endif %}>keep_and_flag</option>
@@ -54,6 +60,8 @@
     <legend>Keywords &amp; locations</legend>
     <label class="chk"><input type="checkbox" name="require_level" value="true"
       {% if config.keywords.require_level %}checked{% endif %}> require_level</label>
+    <p class="muted">Lists are one entry per line (commas also split, so avoid commas inside a
+      phrase). Adzuna/Jooble only query the <b>first 6 roles</b> — order matters there.</p>
     <div class="field">
       <label for="keywords_roles">roles (one per line)</label>
       <textarea id="keywords_roles" name="keywords_roles" rows="4">{{ config.keywords.roles | join('\n') }}</textarea>
@@ -63,8 +71,26 @@
       <textarea id="keywords_must_have" name="keywords_must_have" rows="3">{{ config.keywords.must_have | join('\n') }}</textarea>
     </div>
     <div class="field">
+      <label for="keywords_bonus">bonus (+score if present; never required)</label>
+      <textarea id="keywords_bonus" name="keywords_bonus" rows="2">{{ config.keywords.bonus | join('\n') }}</textarea>
+    </div>
+    <div class="field">
       <label for="keywords_exclude">exclude</label>
       <textarea id="keywords_exclude" name="keywords_exclude" rows="2">{{ config.keywords.exclude | join('\n') }}</textarea>
+    </div>
+    <div class="field">
+      <label for="keywords_level_required">level_required (used only when require_level is on)</label>
+      <textarea id="keywords_level_required" name="keywords_level_required" rows="2">{{ config.keywords.level_required | join('\n') }}</textarea>
+    </div>
+    <div class="field">
+      <label for="keywords_intern_queries">intern_queries (extra internship searches on Adzuna/Jooble)</label>
+      <textarea id="keywords_intern_queries" name="keywords_intern_queries" rows="3">{{ config.keywords.intern_queries | join('\n') }}</textarea>
+    </div>
+    <div class="field">
+      <label for="max_experience_years">max_experience_years (drop non-internships demanding more; 0 = off)</label>
+      <input type="number" id="max_experience_years" name="max_experience_years" min="0"
+             value="{{ config.keywords.max_experience_years }}">
+      <span class="field-error" data-field-error="keywords.max_experience_years"></span>
     </div>
     <div class="field">
       <label for="locations">locations</label>
@@ -100,6 +126,17 @@
     <legend>Apply agent (Track D)</legend>
     <label class="chk"><input type="checkbox" name="apply_enabled" value="true"
       {% if config.apply.enabled %}checked{% endif %}> apply.enabled (turn the browser fill agent on)</label>
+    <div class="field">
+      <label for="apply_engine">engine</label>
+      <select id="apply_engine" name="apply_engine">
+        <option value="agentic"
+          {% if config.apply.engine == 'agentic' %}selected{% endif %}>agentic — Claude drives the browser (reaches the form, waits out captchas with you)</option>
+        <option value="deterministic"
+          {% if config.apply.engine == 'deterministic' %}selected{% endif %}>deterministic — selector fill (URL must already be a form)</option>
+      </select>
+    </div>
+    <label class="chk"><input type="checkbox" name="apply_use_browser_cookies" value="true"
+      {% if config.apply.use_browser_cookies %}checked{% endif %}> use_browser_cookies (start logged in via your Zen/Firefox session for the posting's site)</label>
     <div class="field">
       <label for="resume_backend">LLM backend (résumé tailoring + form-fill)</label>
       <select id="resume_backend" name="resume_backend">

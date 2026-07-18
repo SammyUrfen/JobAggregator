@@ -91,7 +91,9 @@
         return; // keep polling — the in-progress run will report completion
       }
       if (!res.ok) {
-        alert("Could not start a run.");
+        let msg = "Could not start a run.";
+        try { msg = (await res.json()).error.message; } catch (_) {}
+        alert(msg);
         stopPolling(btn);
       }
     } catch (e) {
@@ -158,6 +160,8 @@
   }
 
   // ---- 8) auto-apply: launch the local headful fill agent (when apply.enabled) -----------
+  // NOTE: launching does NOT mark the job applied — the agent CLI sets the flag itself once
+  // the form fill actually completes (a launch that dies must not leave a phantom ✓).
   async function postApply(uid) {
     try {
       const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/apply", {
@@ -165,7 +169,6 @@
       });
       const data = await res.json();
       alert(data.message || (res.ok ? "Launched." : "Could not launch."));
-      if (res.ok && data.ok) postAction(uid, "apply");
     } catch (e) { alert("Could not launch the apply agent."); }
   }
 

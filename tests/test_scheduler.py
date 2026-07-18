@@ -128,7 +128,7 @@ def test_lock_prevents_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
     worker = threading.Thread(target=sched.trigger_now, args=("manual",))
     worker.start()
     assert entered.wait(2)  # first run is inside run_cycle, holding the lock
-    assert sched.trigger_now("manual") is None  # second call finds the lock held
+    assert sched.trigger_now("manual") == "busy"  # second call finds the lock held
     release.set()
     worker.join(2)
     assert calls == ["manual"]  # the body was entered exactly once
@@ -145,7 +145,7 @@ def test_db_active_run_skips_before_run_cycle(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(store, "load_effective_config", lambda conn: _cfg(catch_up=True))
     monkeypatch.setattr(runs_repo, "current_run", lambda conn: {"run_id": 1})  # truthy
     sched = _sched()
-    assert sched.trigger_now("manual") is None
+    assert sched.trigger_now("manual") == "busy"
     assert called == []  # run_cycle never invoked while a DB run is active
 
 

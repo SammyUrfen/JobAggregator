@@ -35,6 +35,7 @@ router = APIRouter()
 _SOURCE_TOGGLES = (
     "jobspy",
     "unstop",
+    "internshala",
     "remoteok",
     "himalayas",
     "jobicy",
@@ -57,6 +58,7 @@ class ConfigForm(BaseModel):
 
     salary_min_remote: int | None = None
     salary_min_in_office: int | None = None
+    salary_min_internship: int | None = None
     salary_on_missing: str | None = None
     demote_in_office_if_unknown: bool | None = None
 
@@ -67,6 +69,8 @@ class ConfigForm(BaseModel):
     keywords_must_have: str | None = None
     keywords_level_required: str | None = None
     keywords_exclude: str | None = None
+    keywords_intern_queries: str | None = None
+    max_experience_years: int | None = None
     locations: str | None = None
 
     notify_telegram_enabled: bool | None = None
@@ -77,6 +81,7 @@ class ConfigForm(BaseModel):
     # source toggles carried as a JSON-ish dict is overkill; each is an explicit field below.
     src_jobspy: bool | None = None
     src_unstop: bool | None = None
+    src_internshala: bool | None = None
     src_remoteok: bool | None = None
     src_himalayas: bool | None = None
     src_jobicy: bool | None = None
@@ -86,6 +91,8 @@ class ConfigForm(BaseModel):
 
     # apply agent (Track D) + the résumé/form-fill LLM backend
     apply_enabled: bool | None = None
+    apply_engine: str | None = None  # "agentic" (Claude drives the browser) | "deterministic"
+    apply_use_browser_cookies: bool | None = None
     resume_backend: str | None = None  # "coding_agent" (Claude Code, no key) | "openai_compatible"
 
 
@@ -118,6 +125,10 @@ def _apply_keywords(merged: dict[str, Any], f: ConfigForm) -> None:
         kw["level_required"] = _split(f.keywords_level_required)
     if f.keywords_exclude is not None:
         kw["exclude"] = _split(f.keywords_exclude)
+    if f.keywords_intern_queries is not None:
+        kw["intern_queries"] = _split(f.keywords_intern_queries)
+    if f.max_experience_years is not None:
+        kw["max_experience_years"] = f.max_experience_years
     if f.locations is not None:
         merged["locations"] = _split(f.locations)
 
@@ -150,13 +161,21 @@ def _apply_form(current: dict[str, Any], f: ConfigForm) -> dict[str, Any]:
         (
             (f.salary_min_remote, "min_remote"),
             (f.salary_min_in_office, "min_in_office"),
+            (f.salary_min_internship, "min_internship"),
             (f.salary_on_missing, "on_missing"),
             (f.demote_in_office_if_unknown, "demote_in_office_if_unknown"),
         ),
     )
     _apply_keywords(merged, f)
     _apply_notify_sources(merged, f)
-    _overlay(merged["apply"], ((f.apply_enabled, "enabled"),))
+    _overlay(
+        merged["apply"],
+        (
+            (f.apply_enabled, "enabled"),
+            (f.apply_engine, "engine"),
+            (f.apply_use_browser_cookies, "use_browser_cookies"),
+        ),
+    )
     _overlay(merged["resume"], ((f.resume_backend, "backend"),))
     return merged
 

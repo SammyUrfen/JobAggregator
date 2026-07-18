@@ -15,6 +15,7 @@
   <h3 class="jc-title">{{ job.title }}</h3>
   <div class="jc-company">{{ job.company }}</div>
   <div class="jc-meta">
+    {% if job.is_internship %}<span class="badge intern">Intern</span>{% endif %}
     {% if job.is_remote %}
       <span class="badge remote">Remote</span>
     {% else %}
@@ -24,7 +25,9 @@
     <span class="badge source">{{ job.source }}</span>
   </div>
   <div class="jc-foot">
-    <span class="muted mono jc-posted">{{ job.posted_at or '—' }}</span>
+    {#- Date only: the full ISO timestamp (with microseconds + offset) pushed the action
+        buttons out of the card. The precise time lives in the detail modal. -#}
+    <span class="muted mono jc-posted" title="{{ job.posted_at or '' }}">{{ (job.posted_at or '')[:10] or '—' }}</span>
     <div class="jc-actions actions">{{ quick_actions(job) }}</div>
   </div>
 </article>

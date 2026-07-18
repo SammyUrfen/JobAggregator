@@ -22,7 +22,7 @@ from job_aggregator.dashboard.deps import (
     get_templates,
     header_context,
 )
-from job_aggregator.errors import RunInProgressError
+from job_aggregator.errors import JobAggregatorError, RunInProgressError
 
 router = APIRouter()
 
@@ -81,10 +81,13 @@ def runs_page(
 
 @router.post("/api/runs", status_code=202)
 async def run_now(scheduler: SchedulerProtocol = Depends(get_scheduler)) -> dict[str, Any]:
-    run_id = await run_in_threadpool(scheduler.trigger_now, "manual")  # off the event loop
-    if run_id is None:
+    outcome = await run_in_threadpool(scheduler.trigger_now, "manual")  # off the event loop
+    if outcome == "busy" or outcome is None:  # None: legacy/duck-typed schedulers in tests
         raise RunInProgressError("a run is already in progress")
-    return {"run_id": run_id, "status": "running"}
+    if outcome == "failed":
+        # A crashed run must NOT masquerade as "already in progress" — say it failed.
+        raise JobAggregatorError("the run failed — see the runs page / server log")
+    return {"run_id": outcome, "status": "running"}
 
 
 @router.get("/api/runs/current")

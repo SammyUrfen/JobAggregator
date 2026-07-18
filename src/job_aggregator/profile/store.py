@@ -61,5 +61,15 @@ def save_profile_text(text: str, path: str | Path | None = None) -> Profile:
     except Exception as exc:  # pydantic ValidationError -> friendly envelope
         raise ConfigError(f"profile failed validation: {exc}", details=where) from exc
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(text, encoding="utf-8")
+    # tmp + replace: a crash mid-write must never leave a truncated profile.yaml (mirrors
+    # apply/session.py's atomic blob write). os.replace fails across filesystems, hence a
+    # sibling tmp file. NOTE: when profile.yaml is a Docker bind-MOUNTED file, replace() would
+    # swap the mount point out from under the container — fall back to in-place write there.
+    tmp = resolved.with_name(resolved.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(resolved)
+    except OSError:  # bind-mounted single file (EBUSY/EXDEV) — validated content, write direct
+        tmp.unlink(missing_ok=True)
+        resolved.write_text(text, encoding="utf-8")
     return profile

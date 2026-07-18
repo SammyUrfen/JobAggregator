@@ -14,6 +14,7 @@
   </header>
 
   <div class="jd-badges">
+    {% if job.is_internship %}<span class="badge intern">Internship</span>{% endif %}
     {% if job.is_remote %}
       <span class="badge remote">Remote</span>
     {% else %}
@@ -27,10 +28,11 @@
     {% endif %}
   </div>
 
+  {#- Minute precision reads better than raw ISO (microseconds + offset) in the facts grid. -#}
   <dl class="jd-facts mono">
-    <div><dt>Posted</dt><dd>{{ job.posted_at or '—' }}</dd></div>
-    <div><dt>First seen</dt><dd>{{ job.first_seen_at }}</dd></div>
-    <div><dt>Last seen</dt><dd>{{ job.last_seen_at }}</dd></div>
+    <div><dt>Posted</dt><dd>{{ ((job.posted_at or '')[:16]|replace('T', ' ')) or '—' }}</dd></div>
+    <div><dt>First seen</dt><dd>{{ (job.first_seen_at or '')[:16]|replace('T', ' ') }}</dd></div>
+    <div><dt>Last seen</dt><dd>{{ (job.last_seen_at or '')[:16]|replace('T', ' ') }}</dd></div>
     {% if job.salary_raw %}<div><dt>Salary (raw)</dt><dd>{{ job.salary_raw }}</dd></div>{% endif %}
   </dl>
 
@@ -64,9 +66,11 @@
     <div class="jd-tailor" data-uid="{{ job.job_uid }}"></div>
     <div class="jd-secondary actions">{{ quick_actions(job) }}</div>
     <p class="jd-note muted">
-      {% if apply_enabled %}<b>Auto-apply</b> opens a local browser, fills the form from your profile,
-      and stops for you to review + submit.{% else %}<b>Apply</b> opens the posting and marks it
-      applied (turn on the fill agent with <code>apply.enabled</code> + the <code>[apply]</code>
+      {% if apply_enabled %}<b>Auto-apply</b> opens a Chromium window where Claude clicks through to
+      the application form (Easy/Quick Apply included, using your browser's logins), fills it from
+      your profile, and stops for you to review + submit. If a captcha or login appears, solve it in
+      that window — the agent waits and continues.{% else %}<b>Apply</b> opens the posting and marks
+      it applied (turn on the fill agent with <code>apply.enabled</code> + the <code>[apply]</code>
       extra).{% endif %} <b>Tailor résumé</b> builds a role-tailored PDF from your profile.
     </p>
   </footer>

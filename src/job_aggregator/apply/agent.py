@@ -11,6 +11,7 @@ Only `driver.fill_form` touches a browser; everything here is pure orchestration
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -18,10 +19,12 @@ from urllib.parse import urlparse
 from job_aggregator.apply.ats import detect_ats
 from job_aggregator.apply.driver import ApplicationFields
 from job_aggregator.apply.session import load_state, save_state
-from job_aggregator.errors import AgentError
+from job_aggregator.errors import AgentError, ConfigError
 from job_aggregator.paths import resumes_dir
 from job_aggregator.resume.render import compile_pdf, render_latex
 from job_aggregator.resume.tailor import tailor_resume
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from job_aggregator.apply.backends import AgentBackend
@@ -120,9 +123,16 @@ def apply_to_job(
         job.url, fields, selectors=selectors, storage_state=state, headful=True
     )
 
-    # 5. persist a freshly-created session so the next apply to this domain skips the login
+    # 5. persist a freshly-created session so the next apply to this domain skips the login.
+    # Session persistence is OPTIONAL — a missing/invalid JOBAGG_SESSION_KEY must never discard
+    # the result of a fill the human already reviewed (it used to raise here, AFTER the work).
+    flags = list(tailored.flags)
     if result.new_state is not None:
-        save_state(domain, result.new_state)
+        try:
+            save_state(domain, result.new_state)
+        except ConfigError as exc:
+            log.warning("session for %s not saved: %s", domain, exc.message)
+            flags.append(f"session not saved — {exc.message}")
 
     return ApplyResult(
         job_uid=job.job_uid,
@@ -134,5 +144,5 @@ def apply_to_job(
         needs_login=result.needs_login,
         submitted=False,
         preservation=tailored.preservation,
-        flags=tailored.flags,
+        flags=flags,
     )

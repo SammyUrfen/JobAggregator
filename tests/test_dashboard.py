@@ -574,12 +574,8 @@ def test_apply_route_disabled_returns_ok_false(client: TestClient) -> None:
     assert r.json()["ok"] is False
 
 
-def test_apply_route_launches_when_enabled(
-    client: TestClient, db_path: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _enable_apply(db_path: str) -> None:
     import json as _json
-
-    from job_aggregator.dashboard import routes_jobs
 
     conn = connect(db_path)
     data = _json.loads(conn.execute("SELECT data FROM config WHERE id=1").fetchone()["data"])
@@ -587,12 +583,78 @@ def test_apply_route_launches_when_enabled(
     conn.execute("UPDATE config SET data=? WHERE id=1", (_json.dumps(data),))
     conn.commit()
     conn.close()
+
+
+class _FakeApplyProc:
+    """A healthy just-spawned agent: still running when the route's grace-period wait fires."""
+
+    returncode: int | None = None
+
+    def __init__(self, rc: int | None = None) -> None:
+        self.returncode = rc
+
+    def wait(self, timeout: float | None = None) -> int:
+        import subprocess
+
+        if self.returncode is None:
+            raise subprocess.TimeoutExpired(cmd="apply", timeout=timeout or 0)
+        return self.returncode
+
+
+def test_apply_route_launches_when_enabled(
+    client: TestClient, db_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from job_aggregator.dashboard import routes_jobs
+
+    _enable_apply(db_path)
     launched: list[tuple[str, str]] = []
-    monkeypatch.setattr(routes_jobs, "_launch_apply", lambda uid, db: launched.append((uid, db)))
+    monkeypatch.setattr(routes_jobs, "_apply_preflight", lambda uid: None)
+
+    def fake_launch(uid: str, db: str) -> _FakeApplyProc:
+        launched.append((uid, db))
+        return _FakeApplyProc()
+
+    monkeypatch.setattr(routes_jobs, "_launch_apply", fake_launch)
     r = client.post("/api/jobs/j1/apply")
     assert r.status_code == 200
     assert r.json()["ok"] is True
     assert launched and launched[0][0] == "j1"  # the local agent was spawned for this job
+
+
+def test_apply_route_preflight_refusal_is_honest(
+    client: TestClient, db_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Headless/Docker serve must NOT claim a browser is opening — it returns the host command.
+    from job_aggregator.dashboard import routes_jobs
+
+    _enable_apply(db_path)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(routes_jobs, "_launch_apply", lambda uid, db: pytest.fail("must not spawn"))
+    r = client.post("/api/jobs/j1/apply")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert "apply j1" in body["message"]  # actionable: the exact host-side command
+
+
+def test_apply_route_reports_instant_child_death(
+    client: TestClient, db_path: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A spawned agent that dies within the grace window surfaces its error, not a fake success.
+    from job_aggregator.dashboard import routes_jobs
+
+    _enable_apply(db_path)
+    monkeypatch.setattr(routes_jobs, "_apply_preflight", lambda uid: None)
+    monkeypatch.setattr(routes_jobs, "_launch_apply", lambda uid, db: _FakeApplyProc(rc=1))
+    monkeypatch.setattr(
+        routes_jobs, "_apply_log_tail", lambda: "error [render_failed]: no LaTeX engine found"
+    )
+    r = client.post("/api/jobs/j1/apply")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert "no LaTeX engine" in body["message"]
 
 
 def test_apply_route_unknown_uid_404(client: TestClient) -> None:
@@ -703,3 +765,18 @@ def test_lifespan_starts_and_stops_scheduler(db_path: str) -> None:
     with TestClient(app):
         assert sched.started is True
     assert sched.stopped is True
+
+
+def test_jobs_intern_filter(client: TestClient, db_path: str) -> None:
+    """`?intern=1` narrows the grid to is_internship rows and renders the Intern badge."""
+    conn = connect(db_path)
+    conn.execute("UPDATE jobs SET is_internship = 1 WHERE job_uid = 'j1'")
+    conn.commit()
+    conn.close()
+    r = client.get("/?intern=1")
+    assert r.status_code == 200
+    assert 'data-uid="j1"' in r.text
+    assert 'data-uid="j2"' not in r.text
+    assert '<span class="badge intern">' in r.text
+    r_all = client.get("/")
+    assert 'data-uid="j2"' in r_all.text  # unfiltered view still shows everything
