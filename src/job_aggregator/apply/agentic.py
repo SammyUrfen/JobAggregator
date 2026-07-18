@@ -246,8 +246,15 @@ class AgenticSession:
             )
             if cookies:
                 # Imported browser cookies go on TOP of any saved session: the user's real
-                # browser login is the fresher of the two.
-                ctx.add_cookies(cookies)
+                # browser login is the fresher of the two. NEVER fatal — a malformed cookie
+                # (a browser-specific format quirk) degrades to a logged-out session, not a
+                # dead apply (this exact call once killed every attempt on a Zen quirk).
+                try:
+                    ctx.add_cookies(cookies)
+                except Exception:
+                    log.warning(
+                        "browser-cookie import rejected; continuing logged-out", exc_info=True
+                    )
             page = ctx.new_page()
             page.goto(url, wait_until="domcontentloaded")
 

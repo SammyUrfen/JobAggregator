@@ -233,3 +233,29 @@ def test_find_cookie_db_explicit_path_wins(tmp_path: Path) -> None:
     _write_cookie_db(db, [])
     assert find_cookie_db(db) == db
     assert find_cookie_db(tmp_path / "absent.sqlite") is None
+
+
+@pytest.mark.parametrize(
+    ("expiry", "expected"),
+    [
+        (1784013663, 1784013663),  # stock Firefox: seconds pass through
+        (1784013663000, 1784013663),  # Zen: MILLISECONDS -> normalized to seconds
+        (0, -1),  # session cookie
+        (None, -1),
+        (-5, -1),
+        ("garbage", -1),
+    ],
+)
+def test_expires_seconds_normalizes_zen_milliseconds(expiry: object, expected: int) -> None:
+    from job_aggregator.apply.cookies import _expires_seconds
+
+    assert _expires_seconds(expiry) == expected
+
+
+def test_load_cookies_millisecond_expiry_normalized(tmp_path: Path) -> None:
+    """The Zen quirk that killed every apply attempt: ms-scale expiry passed to Playwright as
+    'seconds' (year ~58,000) is rejected, and one bad cookie sank the whole context."""
+    db = tmp_path / "cookies.sqlite"
+    _write_cookie_db(db, [("access_token", "S", ".unstop.com", "/", 1786605647691, 1, 1, 1)])
+    (cookie,) = load_cookies_for_url("https://unstop.com/internships/x", db_path=db)
+    assert cookie["expires"] == 1786605647  # seconds, within Playwright's valid range

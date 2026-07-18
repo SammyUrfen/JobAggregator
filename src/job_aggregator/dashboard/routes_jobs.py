@@ -524,13 +524,30 @@ def _launch_apply(uid: str, db_path: str) -> subprocess.Popen[bytes]:
     )
 
 
+# Lines that carry the actual failure in a python traceback / CLI error envelope. Matched
+# bottom-up: the LAST error-ish line is the terminal exception, not an intermediate frame.
+_ERROR_LINE_RE = re.compile(r"error|exception|traceback", re.IGNORECASE)
+
+
 def _apply_log_tail() -> str:
-    """The last line of the spawned agent's log — the CLI prints its error envelope there."""
+    """The most informative line of the spawned agent's log.
+
+    Bottom-up search for an error-ish line — stdout/stderr interleave, so the literal last
+    line can be a harmless startup print sitting BELOW the traceback (that once made the
+    alert show 'engine: agentic …' while the real error sat 3 lines up). Falls back to the
+    last non-empty line."""
     try:
         lines = (data_dir() / _APPLY_LOG_NAME).read_text(errors="replace").strip().splitlines()
-        return lines[-1] if lines else "no output captured"
     except OSError:
         return "no output captured"
+    if not lines:
+        return "no output captured"
+    for line in reversed(lines):
+        if _ERROR_LINE_RE.search(line) and line.strip() not in (
+            "Traceback (most recent call last):",
+        ):
+            return line.strip()
+    return lines[-1].strip()
 
 
 @router.post("/api/jobs/{uid}/apply")

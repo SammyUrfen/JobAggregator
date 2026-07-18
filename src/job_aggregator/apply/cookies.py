@@ -36,9 +36,29 @@ _PROFILE_GLOBS = (
 )
 # Firefox moz_cookies.sameSite -> Playwright sameSite. Firefox: 0=None, 1=Lax, 2=Strict.
 _SAMESITE = {0: "None", 1: "Lax", 2: "Strict"}
+# Values at/above this magnitude are epoch MILLISECONDS (same heuristic as pipeline.normalize):
+# stock Firefox stores expiry in seconds, but Zen stores milliseconds (observed live 2026-07-18)
+# — passed through as "seconds" they land in year ~58,000 and Playwright rejects the cookie,
+# which used to kill the whole apply session at add_cookies.
+_EPOCH_MS_THRESHOLD = 10**11
 # Multi-label public suffixes where the registrable domain is THREE labels (foo.co.in). A tiny
 # hand list beats a tldextract dependency for the handful of job domains this ever sees.
 _SECOND_LEVEL_SUFFIXES = frozenset({"co", "com", "org", "net", "ac", "gov", "edu"})
+
+
+def _expires_seconds(expiry: object) -> int:
+    """A moz_cookies.expiry value -> Playwright `expires` (unix SECONDS, or -1 for session).
+
+    Magnitude-detects Zen's millisecond timestamps and divides them down; anything absent,
+    non-numeric, or non-positive maps to -1 (treat as a session cookie) — Playwright accepts
+    only -1 or a sane positive number, and one bad cookie must never sink the import."""
+    try:
+        value = int(expiry)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return -1
+    if value >= _EPOCH_MS_THRESHOLD:
+        value //= 1000
+    return value if value > 0 else -1
 
 
 def base_domain(host: str) -> str:
@@ -112,7 +132,7 @@ def load_cookies_for_url(url: str, *, db_path: str | Path | None = None) -> list
             "value": value,
             "domain": chost,
             "path": cpath or "/",
-            "expires": int(expiry) if expiry else -1,
+            "expires": _expires_seconds(expiry),
             "secure": bool(secure),
             "httpOnly": bool(http_only),
             "sameSite": _SAMESITE.get(same_site, "Lax"),
