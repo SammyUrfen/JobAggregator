@@ -198,6 +198,105 @@ def test_unstop_all_fail_is_failed(now_clock: FixedClock, cfg: Config) -> None:
     assert res.succeeded is False
 
 
+def test_unstop_requests_open_applications_only(
+    load_fixture: Loader, now_clock: FixedClock, cfg: Config
+) -> None:
+    """oppstatus=open must ride on every request — Unstop keeps closed posts "LIVE" so the
+    server-side filter is the only cheap way to skip un-appliable postings."""
+    with respx.mock:
+        route = respx.route(method="GET", host="unstop.com").mock(
+            return_value=httpx.Response(200, json=load_fixture("unstop.json"))
+        )
+        UnstopSource(opportunities=["internships"], search_terms=[], max_age_days=30).fetch(
+            cfg, now_clock
+        )
+    assert route.calls[0].request.url.params["oppstatus"] == "open"
+
+
+def test_unstop_drops_finished_registration(now_clock: FixedClock) -> None:
+    """Defense-in-depth behind oppstatus=open: reg_status FINISHED ("Application Closed" on the
+    site) is dropped; a missing regnRequirements fails OPEN (can't prove it's closed)."""
+
+    def item(iid: int, reg_status: str | None) -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "id": iid,
+            "title": f"Backend Internship {iid}",
+            "organisation": {"name": "Acme"},
+            "seo_url": f"https://unstop.com/internships/x-{iid}",
+            "updated_at": "2026-07-10T00:00:00+00:00",
+        }
+        if reg_status is not None:
+            base["regnRequirements"] = {"reg_status": reg_status}
+        return base
+
+    items = [item(1, "FINISHED"), item(2, "STARTED"), item(3, None)]
+    with respx.mock:
+        respx.route(method="GET", host="unstop.com").mock(
+            side_effect=[
+                httpx.Response(200, json={"data": {"data": items}}),
+                httpx.Response(200, json={"data": {"data": []}}),
+            ]
+        )
+        res = UnstopSource(opportunities=["internships"], search_terms=[], max_age_days=30).fetch(
+            Config(), now_clock
+        )
+    kept_ids = {j.source_native_id for j in res.jobs}
+    assert kept_ids == {"2", "3"}  # FINISHED dropped; STARTED + unknown kept
+
+
+def test_unstop_sends_search_terms_and_dedupes(
+    load_fixture: Loader, now_clock: FixedClock, cfg: Config
+) -> None:
+    """The config search_terms must reach the API as `searchTerm` (they used to be silently
+    ignored, so the source pulled the all-domains firehose), one walk per (opportunity x term),
+    with items deduped by id across walks."""
+    with respx.mock:
+        route = respx.route(method="GET", host="unstop.com").mock(
+            return_value=httpx.Response(200, json=load_fixture("unstop.json"))
+        )
+        res = UnstopSource(
+            opportunities=["internships"],
+            search_terms=["backend", "machine learning"],
+            max_age_days=30,
+        ).fetch(cfg, now_clock)
+    assert route.calls.call_count == 2  # one walk per term
+    assert route.calls[0].request.url.params["searchTerm"] == "backend"
+    assert route.calls[1].request.url.params["searchTerm"] == "machine learning"
+    assert res.n_fetched == 1  # both walks returned the same posting -> deduped by id
+
+
+def test_unstop_maps_details_skills_function_as_description(now_clock: FixedClock) -> None:
+    """details/required_skills/workfunction feed the description — without one, the must_have
+    stack-anchor gate ran title-only and false-dropped real tech internships."""
+    item = {
+        "id": 991,
+        "title": "Data Engineer Internship",
+        "organisation": {"name": "TalentCV"},
+        "seo_url": "https://unstop.com/internships/data-engineer-991",
+        "updated_at": "2026-07-10T00:00:00+00:00",
+        "region": "online",
+        "details": "<p>Build data pipelines in Python.</p>",
+        "required_skills": [{"name": "Python"}, {"name": "SQL"}],
+        "workfunction": "Backend Development",
+    }
+    with respx.mock:
+        respx.route(method="GET", host="unstop.com").mock(
+            side_effect=[
+                httpx.Response(200, json={"data": {"data": [item]}}),
+                httpx.Response(200, json={"data": {"data": []}}),
+            ]
+        )
+        res = UnstopSource(opportunities=["internships"], search_terms=[], max_age_days=30).fetch(
+            Config(), now_clock
+        )
+    job = res.jobs[0]
+    assert job.description is not None
+    assert "Build data pipelines in Python." in job.description
+    assert "Skills: Python, SQL" in job.description
+    assert "Function: Backend Development" in job.description
+    assert job.is_remote is True  # region "online"
+
+
 # ── get_json retry/backoff ──────────────────────────────────────────────────────────────
 
 
@@ -260,7 +359,9 @@ def test_paginate_stops_on_empty_page() -> None:
         calls.append(page)
         return pages[page]
 
-    assert paginate_until_empty(fetch, max_pages=10) == [1, 2, 3, 4, 5]
+    items, exhausted = paginate_until_empty(fetch, max_pages=10)
+    assert items == [1, 2, 3, 4, 5]
+    assert exhausted is True  # the API's own completion signal = we saw the full view
     assert calls == [1, 2, 3]  # stopped once the API returned none
 
 
@@ -268,11 +369,15 @@ def test_paginate_stops_on_short_page() -> None:
     def fetch(page: int) -> list[Any]:
         return list(range(50)) if page == 1 else list(range(10))  # page 2 is short
 
-    assert len(paginate_until_empty(fetch, max_pages=10, page_size=50)) == 60
+    items, exhausted = paginate_until_empty(fetch, max_pages=10, page_size=50)
+    assert len(items) == 60
+    assert exhausted is True
 
 
-def test_paginate_respects_max_pages_cap() -> None:
-    assert paginate_until_empty(lambda page: [page], max_pages=3) == [1, 2, 3]  # never empty
+def test_paginate_respects_max_pages_cap_and_reports_windowed() -> None:
+    items, exhausted = paginate_until_empty(lambda page: [page], max_pages=3)  # never empty
+    assert items == [1, 2, 3]
+    assert exhausted is False  # cap hit -> the view is a WINDOW, not the full inventory
 
 
 def test_paginate_first_page_error_propagates() -> None:
@@ -283,13 +388,15 @@ def test_paginate_first_page_error_propagates() -> None:
         paginate_until_empty(fetch, max_pages=5)
 
 
-def test_paginate_later_page_error_keeps_earlier() -> None:
+def test_paginate_later_page_error_keeps_earlier_but_not_exhausted() -> None:
     def fetch(page: int) -> list[Any]:
         if page == 1:
             return [1, 2]
         raise SourceError("rate limited mid-pagination")
 
-    assert paginate_until_empty(fetch, max_pages=5) == [1, 2]  # page-1 kept
+    items, exhausted = paginate_until_empty(fetch, max_pages=5)
+    assert items == [1, 2]  # page-1 kept
+    assert exhausted is False  # truncated by the error -> absence proves nothing
 
 
 # ── source pagination + query targeting ─────────────────────────────────────────────────
@@ -313,22 +420,28 @@ def _adzuna_page(n: int, start: int = 0) -> dict[str, Any]:
 
 def test_adzuna_paginates_and_query_targets(now_clock: FixedClock, cfg: Config) -> None:
     one = cfg.model_copy(deep=True)
-    one.keywords.roles = ["backend engineer"]  # single role -> exactly one `what` query
+    one.keywords.roles = ["backend engineer"]  # single role -> one `what` query + intern walk
     with respx.mock:
         route = respx.route(method="GET", host="api.adzuna.com").mock(
             side_effect=[
-                httpx.Response(200, json=_adzuna_page(50)),  # full page -> keep going
-                httpx.Response(200, json=_adzuna_page(10, start=50)),  # short -> stop
+                httpx.Response(200, json=_adzuna_page(50)),  # role p1: full page -> keep going
+                httpx.Response(200, json=_adzuna_page(10, start=50)),  # role p2: short -> stop
+                httpx.Response(200, json=_adzuna_page(5, start=100)),  # intern walk: short -> stop
             ]
         )
         res = AdzunaSource("in", "A", "K", max_pages=5).fetch(one, now_clock)
-    assert route.calls.call_count == 2
-    assert res.n_fetched == 60
+    assert route.calls.call_count == 3
+    assert res.n_fetched == 65
+    assert res.exhaustive is True  # every walk ended on the API's own short-page signal
     assert route.calls[0].request.url.path.endswith("/search/1")
     assert route.calls[1].request.url.path.endswith("/search/2")
     params = route.calls[0].request.url.params
     assert params["what"] == "backend engineer"  # per-role AND phrase, not a broad word-OR
     assert params["category"] == "it-jobs"  # constrained to software/IT at the source
+    intern_params = route.calls[2].request.url.params
+    assert intern_params["title_only"] == "intern"  # dedicated internship query rides along
+    assert "what" not in intern_params
+    assert intern_params["max_days_old"] == "35"  # recency cap: intern search surfaces 2022 posts
 
 
 def test_adzuna_no_roles_uses_fallback_query(now_clock: FixedClock) -> None:
@@ -410,8 +523,10 @@ def test_registry_builds_tier_b_and_c(monkeypatch: pytest.MonkeyPatch, cfg: Conf
     c.sources.ats.ashby.orgs = ["Acme"]
     c.sources.ats.smartrecruiters.company_ids = ["acme"]
     names = {s.name for s in registry.build_enabled_sources(c)}
-    assert {"remoteok", "himalayas", "jobicy", "unstop", "adzuna", "jooble"} <= names
+    assert {"remoteok", "himalayas", "unstop", "internshala", "adzuna", "jooble"} <= names
     assert {"greenhouse", "lever", "ashby", "smartrecruiters"} <= names
+    # jobicy ships disabled: zero internships + no India geo server-side (verified live).
+    assert "jobicy" not in names
 
 
 def test_registry_skips_keyed_sources_without_env(

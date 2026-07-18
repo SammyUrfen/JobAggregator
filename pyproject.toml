@@ -22,6 +22,7 @@ dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "httpx>=0.27",               # Tier B/C API + ATS fetches
+    "beautifulsoup4>=4.12",      # Internshala listing-page parsing (HTML source, no API)
     "python-jobspy>=1.1.79",     # Tier A: Naukri/LinkedIn-guest/Indeed/Google
     "rapidfuzz>=3.9",            # fuzzy near-duplicate title matching
     "apscheduler>=3.10,<4",      # daily in-process scheduler (3.x API; see PLAN Phase 6)
@@ -105,6 +106,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 # core tool never requires them (mirrors the jobspy _scrape_jobs seam).
 "src/job_aggregator/apply/session.py" = ["PLC0415"]
 "src/job_aggregator/apply/driver.py" = ["PLC0415"]
+"src/job_aggregator/apply/agentic.py" = ["PLC0415"]
+# the v2 migration borrows pipeline.filters.detect_internship for its backfill; importing it
+# lazily keeps the storage layer free of a module-load-time dependency on the pipeline layer.
+"src/job_aggregator/storage/db.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"

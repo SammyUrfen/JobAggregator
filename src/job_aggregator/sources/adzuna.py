@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -21,12 +22,21 @@ if TYPE_CHECKING:
     from job_aggregator.clock import Clock
     from job_aggregator.config.schema import Config
 
+log = logging.getLogger(__name__)
+
 _RESULTS_PER_PAGE = 50
 _PAGES_PER_QUERY = 2  # bound requests: Adzuna is queried once per role phrase (see _role_queries).
 _MAX_ROLE_QUERIES = 6
 _ADZUNA_CATEGORY = (
     "it-jobs"  # constrain to software/IT at the source (drops accounting/PR/teaching)
 )
+# Dedicated internship query: title_only=intern (server-side stemmed — also matches
+# "internship") beats what-phrase intern queries, which match descriptions and return 1800+
+# noisy rows. Verified live 2026-07-18: 690 IT internships, 266 within 35 days.
+_INTERN_TITLE_ONLY = "intern"
+# Without a recency cap the intern query surfaces years-old posts (saw created=2022-09-01).
+_INTERN_MAX_DAYS_OLD = 35
+_INTERN_PAGES = 6  # ~266 fresh IT internships ≈ 6 pages of 50
 # Adzuna localizes pay to the country's currency; map the ISO country to it.
 _ADZUNA_CCY = {"in": "INR", "gb": "GBP", "us": "USD", "au": "AUD", "ca": "CAD", "de": "EUR"}
 
@@ -36,7 +46,15 @@ def _role_queries(cfg: Config) -> list[str]:
     returns genuinely on-topic tech jobs, whereas a broad word-OR of the same roles returns generic
     noise (accounting/PR/teaching) that merely contains a common word like "engineer" — verified
     live. Falls back to a generic software query when no roles are configured."""
-    queries = [r.strip() for r in cfg.keywords.roles if r.strip()][:_MAX_ROLE_QUERIES]
+    all_roles = [r.strip() for r in cfg.keywords.roles if r.strip()]
+    queries = all_roles[:_MAX_ROLE_QUERIES]
+    if len(all_roles) > _MAX_ROLE_QUERIES:
+        # The textarea implies every role matters; say which ones this source will not query.
+        log.warning(
+            "adzuna queries only the first %d roles; not queried: %s",
+            _MAX_ROLE_QUERIES,
+            ", ".join(all_roles[_MAX_ROLE_QUERIES:]),
+        )
     return queries or ["software engineer"]
 
 
@@ -52,13 +70,25 @@ class AdzunaSource(Source):
     def fetch(self, cfg: Config, clock: Clock) -> SourceResult:
         start = time.perf_counter()
         base = f"https://api.adzuna.com/v1/api/jobs/{self.country}/search"
-        pages = min(self.max_pages, _PAGES_PER_QUERY)
+        role_pages = min(self.max_pages, _PAGES_PER_QUERY)
         seen: set[str] = set()
         items: list[Any] = []
+        exhausted = True
+        # (extra query params, pages) per walk: role phrases first, then the dedicated
+        # internship query (title-targeted + recency-capped — see _INTERN_* constants).
+        walks: list[tuple[dict[str, Any], int]] = [
+            ({"what": what}, role_pages) for what in _role_queries(cfg)
+        ]
+        walks.append(
+            (
+                {"title_only": _INTERN_TITLE_ONLY, "max_days_old": _INTERN_MAX_DAYS_OLD},
+                min(self.max_pages, _INTERN_PAGES),
+            )
+        )
         with make_client() as client:
-            for what in _role_queries(cfg):
+            for extra, pages in walks:
 
-                def fetch_page(page: int, what: str = what) -> list[Any]:
+                def fetch_page(page: int, extra: dict[str, Any] = extra) -> list[Any]:
                     params: dict[str, Any] = {
                         "app_id": self.app_id,
                         "app_key": self.app_key,
@@ -66,14 +96,14 @@ class AdzunaSource(Source):
                         "content-type": "application/json",
                         "sort_by": "date",
                         "category": _ADZUNA_CATEGORY,
-                        "what": what,  # AND phrase -> on-topic tech jobs (not a broad word-OR)
+                        **extra,
                     }
                     data = get_json(client, f"{base}/{page}", params=params)
                     results = data.get("results") if isinstance(data, dict) else None
                     return results if isinstance(results, list) else []
 
                 try:
-                    page_items = paginate_until_empty(
+                    page_items, walk_done = paginate_until_empty(
                         fetch_page, max_pages=pages, page_size=_RESULTS_PER_PAGE
                     )
                 except SourceError as exc:
@@ -83,7 +113,9 @@ class AdzunaSource(Source):
                         return SourceResult.failed(
                             self.name, str(exc), duration_ms=elapsed_ms(start)
                         )
+                    exhausted = False
                     continue
+                exhausted = exhausted and walk_done
                 for it in page_items:
                     key = str(it.get("id") or "")
                     if key and key in seen:
@@ -91,7 +123,9 @@ class AdzunaSource(Source):
                     if key:
                         seen.add(key)
                     items.append(it)
-        return build_result(self.name, items, self._map, duration_ms=elapsed_ms(start))
+        return build_result(
+            self.name, items, self._map, duration_ms=elapsed_ms(start), exhaustive=exhausted
+        )
 
     def _map(self, item: Any) -> RawPosting:
         company = (item.get("company") or {}).get("display_name", "")

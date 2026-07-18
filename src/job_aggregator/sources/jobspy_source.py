@@ -134,6 +134,17 @@ def _build_scrape_kwargs(site: str, term: str, jc: JobSpyConfig) -> dict[str, An
         "description_format": _DESCRIPTION_FORMAT,
         "verbose": _VERBOSE,
     }
+    if jc.job_type:
+        kwargs["job_type"] = jc.job_type
+        if site == "indeed":
+            # jobspy limitation (indeed/__init__.py): Indeed cannot combine hours_old with a
+            # job_type/is_remote filter — the type filter wins here (an internship hunt needs
+            # typed results more than a freshness window; dedup absorbs the re-fetch overlap).
+            kwargs.pop("hours_old")
+    if site == "linkedin" and jc.linkedin_fetch_description:
+        # Without this LinkedIn rows carry NO description, so the must_have/role gates ran
+        # title-only and killed generic "Software Intern" titles. One extra request per job.
+        kwargs["linkedin_fetch_description"] = True
     if site in _SITES_REQUIRING_COUNTRY:
         kwargs["country_indeed"] = jc.country_indeed
     if jc.is_remote and site not in _SITES_NO_IS_REMOTE:
@@ -234,6 +245,9 @@ class JobSpySource(Source):
             duration_ms=elapsed,
             error="; ".join(failed) or None,
             sub_results=subs,
+            # results_wanted + hours_old make every jobspy fetch a WINDOW, never the site's
+            # complete view — its jobs must age out, not be deleted on absence (see stale.py).
+            exhaustive=False,
         )
 
     def _row_to_job(self, row: Any, site: str, cfg: Config) -> Job | None:

@@ -54,7 +54,14 @@ class HimalayasSource(Source):
                 return SourceResult.failed(self.name, str(exc), duration_ms=elapsed_ms(start))
         jobs = data.get("jobs") if isinstance(data, dict) else None
         items = jobs if isinstance(jobs, list) else []
-        return build_result(self.name, items, self._map, duration_ms=elapsed_ms(start))
+        # limit=100: fewer items than the limit means we saw the full country inventory.
+        return build_result(
+            self.name,
+            items,
+            self._map,
+            duration_ms=elapsed_ms(start),
+            exhaustive=len(items) < _RESULT_LIMIT,
+        )
 
     @staticmethod
     def _map(item: Any) -> RawPosting:
@@ -68,6 +75,9 @@ class HimalayasSource(Source):
             url=str(item.get("applicationLink", "")),
             location=location,
             is_remote=True,
+            # The API ships a full HTML description (+excerpt); discarding it made the
+            # must_have gate run title-only and false-drop real matches (verified live).
+            description=item.get("description") or item.get("excerpt"),
             salary_min=pos_int_or_none(item.get("minSalary")),
             salary_max=pos_int_or_none(item.get("maxSalary")),
             salary_currency=item.get("currency"),

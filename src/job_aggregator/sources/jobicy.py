@@ -47,7 +47,14 @@ class JobicySource(Source):
                 return SourceResult.failed(self.name, str(exc), duration_ms=elapsed_ms(start))
         jobs = data.get("jobs") if isinstance(data, dict) else None
         items = jobs if isinstance(jobs, list) else []
-        return build_result(self.name, items, self._map, duration_ms=elapsed_ms(start))
+        # count=50 returns the LATEST 50 only — a full page means the view is windowed.
+        return build_result(
+            self.name,
+            items,
+            self._map,
+            duration_ms=elapsed_ms(start),
+            exhaustive=len(items) < _RESULT_COUNT,
+        )
 
     def _map(self, item: Any) -> RawPosting | None:
         # Client-side job_type filter: Jobicy has no server-side type param. A miss is a

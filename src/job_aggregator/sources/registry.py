@@ -16,6 +16,7 @@ from job_aggregator.sources.ats_greenhouse import GreenhouseSource
 from job_aggregator.sources.ats_lever import LeverSource
 from job_aggregator.sources.ats_smartrecruiters import SmartRecruitersSource
 from job_aggregator.sources.himalayas import HimalayasSource
+from job_aggregator.sources.internshala import InternshalaSource
 from job_aggregator.sources.jobicy import JobicySource
 from job_aggregator.sources.jobspy_source import JobSpySource
 from job_aggregator.sources.jooble import JoobleSource
@@ -32,6 +33,8 @@ log = logging.getLogger(__name__)
 _DEFAULT_JOOBLE_QUERY = "backend intern"
 # How many role terms to query Jooble with (one query each; keeps the request count bounded).
 _JOOBLE_QUERY_TERMS = 6
+# How many keywords.intern_queries ride along on Jooble (low internship share; keep it cheap).
+_JOOBLE_INTERN_TERMS = 2
 
 
 def _country_location(cfg: Config) -> str:
@@ -56,7 +59,7 @@ def _build_ats(ats: AtsConfig) -> list[Source]:
     return out
 
 
-def build_enabled_sources(cfg: Config) -> list[Source]:
+def build_enabled_sources(cfg: Config) -> list[Source]:  # noqa: PLR0912 - a linear registry; one branch per source is the point
     """Instantiate every enabled source per cfg.sources in deterministic Tier-A-first order."""
     s = cfg.sources
     out: list[Source] = []
@@ -89,7 +92,18 @@ def build_enabled_sources(cfg: Config) -> list[Source]:
         if key:
             # One query per role term (a comma-joined dump returns 0), and a COUNTRY location — a
             # city like "Bengaluru" returns 0 from Jooble; "India"/nationwide works (verified live).
-            queries = cfg.keywords.roles[:_JOOBLE_QUERY_TERMS] or [_DEFAULT_JOOBLE_QUERY]
+            # intern_queries ride along; Jooble's internship share is ~2% (measured), so this is
+            # a cheap complement, not the internship lever (Unstop/Internshala/jobspy are).
+            roles = cfg.keywords.roles[:_JOOBLE_QUERY_TERMS]
+            if len(cfg.keywords.roles) > _JOOBLE_QUERY_TERMS:
+                log.warning(
+                    "jooble queries only the first %d roles; not queried: %s",
+                    _JOOBLE_QUERY_TERMS,
+                    ", ".join(cfg.keywords.roles[_JOOBLE_QUERY_TERMS:]),
+                )
+            queries = (roles + cfg.keywords.intern_queries[:_JOOBLE_INTERN_TERMS]) or [
+                _DEFAULT_JOOBLE_QUERY
+            ]
             out.append(
                 JoobleSource(
                     api_key=key,
@@ -109,6 +123,8 @@ def build_enabled_sources(cfg: Config) -> list[Source]:
                 max_pages=s.unstop.max_pages,
             )
         )
+    if s.internshala.enabled and s.internshala.slugs:
+        out.append(InternshalaSource(slugs=s.internshala.slugs, max_pages=s.internshala.max_pages))
 
     out.extend(_build_ats(s.ats))
     return out

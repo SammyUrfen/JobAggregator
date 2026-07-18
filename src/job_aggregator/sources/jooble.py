@@ -41,6 +41,7 @@ class JoobleSource(Source):
         pages = min(self.max_pages, _PAGES_PER_QUERY)
         seen: set[str] = set()
         items: list[Any] = []
+        exhausted = True
         with make_client() as client:
             for query in self.queries:
 
@@ -52,7 +53,7 @@ class JoobleSource(Source):
 
                 try:
                     # Jooble advertises no fixed page size -> stop on the first empty page.
-                    page_items = paginate_until_empty(fetch_page, max_pages=pages)
+                    page_items, walk_done = paginate_until_empty(fetch_page, max_pages=pages)
                 except SourceError as exc:
                     # A first-page failure on the FIRST query is systemic (bad key/network) -> fail;
                     # a later query failing keeps what earlier queries already returned.
@@ -60,7 +61,9 @@ class JoobleSource(Source):
                         return SourceResult.failed(
                             self.name, str(exc), duration_ms=elapsed_ms(start)
                         )
+                    exhausted = False
                     continue
+                exhausted = exhausted and walk_done
                 for it in page_items:
                     key = str(it.get("id") or it.get("link") or "")
                     if key and key in seen:
@@ -68,7 +71,9 @@ class JoobleSource(Source):
                     if key:
                         seen.add(key)
                     items.append(it)
-        return build_result(self.name, items, self._map, duration_ms=elapsed_ms(start))
+        return build_result(
+            self.name, items, self._map, duration_ms=elapsed_ms(start), exhaustive=exhausted
+        )
 
     def _map(self, item: Any) -> RawPosting:
         return RawPosting(

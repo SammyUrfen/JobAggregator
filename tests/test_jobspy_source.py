@@ -171,16 +171,34 @@ def test_salary_missing_is_unknown(monkeypatch: pytest.MonkeyPatch, now_clock: F
     assert job.salary_bucket is SalaryBucket.UNKNOWN
 
 
-def test_build_scrape_kwargs_indeed_omits_is_remote() -> None:
+def test_build_scrape_kwargs_indeed_omits_is_remote_and_trades_hours_for_type() -> None:
     k = js._build_scrape_kwargs("indeed", "backend", Config().sources.jobspy)
     assert "is_remote" not in k  # Indeed drops filters if combined
     assert k["country_indeed"] == "india"
-    assert k["hours_old"] == 48
+    assert k["job_type"] == "internship"  # default config targets internships
+    assert "hours_old" not in k  # jobspy: Indeed can't combine hours_old with job_type
     assert k["results_wanted"] == 40
 
 
+def test_build_scrape_kwargs_indeed_keeps_hours_old_without_job_type() -> None:
+    jc = Config().sources.jobspy
+    jc.job_type = ""
+    k = js._build_scrape_kwargs("indeed", "backend", jc)
+    assert k["hours_old"] == 48  # no type filter -> the freshness window stays
+    assert "job_type" not in k
+
+
+def test_build_scrape_kwargs_linkedin_composes_type_hours_and_descriptions() -> None:
+    k = js._build_scrape_kwargs("linkedin", "backend intern", Config().sources.jobspy)
+    assert k["job_type"] == "internship"
+    assert k["hours_old"] == 48  # LinkedIn f_JT composes with hours_old (unlike Indeed)
+    assert k["linkedin_fetch_description"] is True  # else rows carry no description at all
+
+
 def test_build_scrape_kwargs_naukri_has_is_remote_no_country() -> None:
-    k = js._build_scrape_kwargs("naukri", "backend", Config().sources.jobspy)
+    jc = Config().sources.jobspy
+    jc.is_remote = True  # not the default anymore (it strangled LinkedIn intern results)
+    k = js._build_scrape_kwargs("naukri", "backend", jc)
     assert k.get("is_remote") is True
     assert "country_indeed" not in k
 
