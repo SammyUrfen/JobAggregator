@@ -146,6 +146,16 @@ beyond the first 6 are not queried (UI hint added).
   and waits for a manual login instead of thrashing (thrashing logged it out further). ATS
   boards + Internshala/Unstop don't do this and are the reliable path.
 
+**Extra-context feature (`f95bb8d`, 492 passed):** thin-description sources (Internshala/Unstop
+cards) gave tailoring + apply almost nothing to work with. Added a per-job **extra_context**
+(schema **v3** — `_add_column_if_absent`, a user field excluded from the upsert so it survives
+re-fetch; live DB migrated with backup `data/backups/jobs.pre-v3-*.db`). Modal has a textarea +
+**Save context** button (`POST /api/jobs/{uid}/context`); the value is also sent with Tailor and
+Apply so unsaved edits still apply. It's folded into the JD for `tailor_resume` AND passed to the
+apply agent: `ApplicationFields.extra_context` → `build_apply_prompt` "ADDITIONAL CONTEXT" section
+(subject to the no-fabrication rule) so the agent can fill notice-period/availability/screening
+fields. CLI reads `dict(row).get("extra_context")` and threads it through `apply_to_job`.
+
 **Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
 by the user (headless smokes + a real internshala launch that was Stop-tested); LinkedIn Easy
 Apply remains best-effort (anti-bot); dashboard auth / cross-process run-lock / fuzzy-dedup remain
