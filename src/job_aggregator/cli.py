@@ -147,12 +147,15 @@ def cmd_tailor(args: argparse.Namespace) -> int:
 def cmd_apply(args: argparse.Namespace) -> int:
     """Fill a job application in a HEADFUL browser for you to review + submit (Track D; run LOCALLY,
     not in headless docker). Needs `pip install -e '.[apply]' && playwright install chromium`."""
+    import shutil
+
     from job_aggregator.apply.agent import apply_to_job
-    from job_aggregator.apply.driver import PlaywrightDriver
+    from job_aggregator.apply.driver import BrowserDriver, PlaywrightDriver
     from job_aggregator.config.store import load_effective_config
     from job_aggregator.errors import ConfigError, NotFoundError
     from job_aggregator.logging_setup import configure_logging
     from job_aggregator.models.job import Job
+    from job_aggregator.paths import data_dir
     from job_aggregator.profile.store import load_profile
     from job_aggregator.storage.db import connect
 
@@ -163,8 +166,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
         raise NotFoundError("job not found", details={"uid": args.uid})
     cfg = load_effective_config(conn)
     profile = load_profile()
-    # The driver needs an LLM for Set-of-Marks grounding (fills arbitrary forms). If no key is
-    # configured, build_backend raises ConfigError and we fall back to deterministic/generic fills.
+    # The deterministic driver wants an LLM for Set-of-Marks grounding. If no key is configured,
+    # build_backend raises ConfigError and the driver degrades to deterministic/generic fills.
     ground_backend = None
     try:
         from job_aggregator.apply.backends import build_backend
@@ -172,6 +175,35 @@ def cmd_apply(args: argparse.Namespace) -> int:
         ground_backend = build_backend(cfg.resume)
     except ConfigError:
         pass
+
+    # Engine choice: "agentic" = a Claude session drives the visible browser via the playwright
+    # MCP (reaches the form from a posting page, waits with you through captcha/login walls).
+    # Falls back to the deterministic selector fill when the claude/npx CLIs are missing —
+    # an absent tool must degrade the experience, never kill the apply.
+    driver: BrowserDriver
+    claude_bin = (cfg.resume.agent_command or ["claude"])[0]
+    if cfg.apply.engine == "agentic" and shutil.which(claude_bin) and shutil.which("npx"):
+        from job_aggregator.apply.agentic import AgenticSession
+
+        driver = AgenticSession(
+            claude_bin=claude_bin,
+            timeout_s=float(cfg.apply.agent_timeout_s),
+            model=cfg.apply.agent_model or None,
+            use_browser_cookies=cfg.apply.use_browser_cookies,
+            cookie_db=cfg.apply.browser_cookie_db or None,
+            log_path=str(data_dir() / "apply_agent.log"),
+        )
+        print(
+            "engine: agentic — Claude drives the browser window; if a captcha or login "
+            "appears, solve it there and the agent continues."
+        )
+    else:
+        if cfg.apply.engine == "agentic":
+            print(
+                f"agentic engine unavailable ({claude_bin!r} or npx not on PATH); "
+                "using the deterministic selector fill"
+            )
+        driver = PlaywrightDriver(backend=ground_backend)
     job = Job.model_validate(
         {
             "job_uid": row["job_uid"],
@@ -184,16 +216,21 @@ def cmd_apply(args: argparse.Namespace) -> int:
             "is_remote": bool(row["is_remote"]) if row["is_remote"] is not None else None,
         }
     )
-    driver = PlaywrightDriver(backend=ground_backend)
     result = apply_to_job(
         job, profile, cfg, driver=driver, backend=(ground_backend if args.llm else None)
     )
+    # Mark applied only NOW — the fill completed and the human reviewed it in the browser.
+    # (The dashboard deliberately does NOT set this on launch; a dead launch left phantom ✓s.)
+    from job_aggregator.storage import jobs_repo
+
+    jobs_repo.set_user_flag(conn, args.uid, "applied", True)
     print(f"ATS: {result.ats or 'generic'}  |  filled: {', '.join(result.filled) or 'none'}")
     print(f"unfilled: {', '.join(result.unfilled) or 'none'}  |  résumé: {result.resume_pdf}")
     print(f"preservation: {result.preservation:.0%}")
     for flag in result.flags:
         print(f"  ! {flag}")
     print("NOT auto-submitted — you reviewed and submitted it yourself in the browser.")
+    print("Marked applied in the dashboard.")
     return 0
 
 
