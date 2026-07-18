@@ -22,10 +22,10 @@ import sys
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlencode, urlparse
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -45,6 +45,7 @@ from job_aggregator.paths import data_dir, default_db_path, resumes_dir
 from job_aggregator.profile.store import load_profile
 from job_aggregator.resume.render import compile_pdf, render_latex
 from job_aggregator.resume.tailor import tailor_resume
+from job_aggregator.storage import jobs_repo
 
 if TYPE_CHECKING:
     from job_aggregator.apply.backends import AgentBackend
@@ -431,20 +432,58 @@ def _tailor_backend(cfg: Config) -> AgentBackend | None:
     return None
 
 
+def _effective_context(conn: sqlite3.Connection, uid: str, sent: str | None) -> str:
+    """The extra context to use for tailoring/apply. A value sent with the request is persisted
+    and wins (so unsaved edits still take effect); otherwise the stored column is used."""
+
+    if sent is not None:
+        cleaned = sent.strip() or None
+        jobs_repo.set_user_flag(conn, uid, "extra_context", cleaned)
+        return cleaned or ""
+    stored = conn.execute("SELECT extra_context FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
+    return (stored["extra_context"] or "") if stored is not None else ""
+
+
+def _build_jd(row: sqlite3.Row, extra_context: str) -> str:
+    """The job-description text fed to tailoring: title + source description + the user's extra
+    context (the real posting text / notes they pasted — often the ONLY real content for a
+    thin-description source like Internshala/Unstop)."""
+    jd = f"{row['title']}\n{html_to_text(row['description'])}"
+    if extra_context.strip():
+        jd += f"\n\nAdditional context:\n{extra_context.strip()}"
+    return jd
+
+
+@router.post("/api/jobs/{uid}/context")
+def job_context(
+    uid: str,
+    extra_context: Annotated[str, Form()] = "",
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> dict[str, Any]:
+    """Persist the user's extra context for this job (feeds tailoring + apply field-fill)."""
+
+    if conn.execute("SELECT 1 FROM jobs WHERE job_uid = ?", (uid,)).fetchone() is None:
+        raise NotFoundError("job not found", details={"uid": uid})
+    jobs_repo.set_user_flag(conn, uid, "extra_context", extra_context.strip() or None)
+    return {"ok": True, "message": "Context saved — used by Tailor résumé and Auto-apply."}
+
+
 @router.post("/api/jobs/{uid}/tailor", response_class=HTMLResponse)
 def job_tailor(
     uid: str,
     request: Request,
+    extra_context: Annotated[str | None, Form()] = None,
     conn: sqlite3.Connection = Depends(get_conn),
     cfg: Config = Depends(get_config),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
-    """Tailor the résumé to this job and return a preview partial + (if built) a PDF link."""
+    """Tailor the résumé to this job and return a preview partial + (if built) a PDF link.
+    Any extra context sent is persisted and folded into the job description first."""
     row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
     if row is None:
         raise NotFoundError("job not found", details={"uid": uid})
     profile = load_profile()  # ConfigError -> 422 friendly ("copy the example profile")
-    jd = f"{row['title']}\n{html_to_text(row['description'])}"
+    jd = _build_jd(row, _effective_context(conn, uid, extra_context))
     tailored = tailor_resume(profile, jd, backend=_tailor_backend(cfg), config=cfg.resume)
     pdf_ready = False
     try:
@@ -562,15 +601,19 @@ def _apply_log_tail() -> str:
 @router.post("/api/jobs/{uid}/apply")
 def job_apply(
     uid: str,
+    extra_context: Annotated[str | None, Form()] = None,
     conn: sqlite3.Connection = Depends(get_conn),
     cfg: Config = Depends(get_config),
 ) -> dict[str, Any]:
     """Launch the local headful apply agent for this job. Guarded by apply.enabled plus a
     preflight (display, [apply] extra, LaTeX engine) so the answer is honest; only works when
     serve runs on your desktop. The uid must match a stored job, and the subprocess uses
-    list-argv (no shell), so it can't inject."""
+    list-argv (no shell), so it can't inject. Any extra context sent is persisted first so the
+    spawned CLI (which reads the same DB) can feed it to tailoring + the form-fill agent."""
     if conn.execute("SELECT 1 FROM jobs WHERE job_uid = ?", (uid,)).fetchone() is None:
         raise NotFoundError("job not found", details={"uid": uid})
+    if extra_context is not None:
+        _effective_context(conn, uid, extra_context)  # persist before the CLI reads the DB
     if not cfg.apply.enabled:
         return {
             "ok": False,

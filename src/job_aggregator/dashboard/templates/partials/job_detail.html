@@ -44,6 +44,22 @@
     {% endif %}
   </div>
 
+  {#- Extra context: the real posting text / field-fill hints. Sources like Internshala/Unstop
+      give a thin description, so this is often the only substantial input to tailoring + apply.
+      Saved to the job (survives re-fetch) and sent with Tailor/Apply. -#}
+  <div class="jd-context">
+    <label for="ctx-{{ job.job_uid }}" class="jd-context-label muted">
+      Extra context for tailoring &amp; auto-apply — paste the full posting, or notes like notice
+      period / availability / answers to screening questions:
+    </label>
+    <textarea id="ctx-{{ job.job_uid }}" class="jd-context-input" data-context-uid="{{ job.job_uid }}"
+              rows="3" placeholder="e.g. full JD text; “Available immediately, 0 notice; open to relocation.”">{{ job.extra_context or '' }}</textarea>
+    <div class="jd-context-actions">
+      <button type="button" class="btn secondary btn-sm" data-context-save="{{ job.job_uid }}">Save context</button>
+      <span class="jd-context-status muted" data-context-status="{{ job.job_uid }}"></span>
+    </div>
+  </div>
+
   <footer class="jd-foot">
     <div class="jd-primary">
       <a class="btn secondary" href="{{ job.url }}" target="_blank" rel="noopener noreferrer">

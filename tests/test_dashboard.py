@@ -807,3 +807,67 @@ def test_apply_stop_when_none_running(client: TestClient, monkeypatch: pytest.Mo
     body = client.post("/api/apply/stop").json()
     assert body["stopped"] == 0
     assert "No apply agent" in body["message"]
+
+
+def test_context_save_persists_and_survives(client: TestClient, db_path: str) -> None:
+    import json as _json
+
+    r = client.post("/api/jobs/j1/context", data={"extra_context": "  Notice: 0 days.  "})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    conn = connect(db_path)
+    stored = conn.execute("SELECT extra_context FROM jobs WHERE job_uid='j1'").fetchone()[0]
+    conn.close()
+    assert stored == "Notice: 0 days."  # trimmed, persisted
+    # empty clears it
+    client.post("/api/jobs/j1/context", data={"extra_context": "   "})
+    conn = connect(db_path)
+    assert conn.execute("SELECT extra_context FROM jobs WHERE job_uid='j1'").fetchone()[0] is None
+    conn.close()
+    del _json
+
+
+def test_context_save_unknown_uid_404(client: TestClient) -> None:
+    r = client.post("/api/jobs/" + "a" * 64 + "/context", data={"extra_context": "x"})
+    assert r.status_code == 404
+
+
+def test_detail_modal_shows_context_editor(client: TestClient, db_path: str) -> None:
+    conn = connect(db_path)
+    conn.execute("UPDATE jobs SET extra_context='pasted JD text' WHERE job_uid='j1'")
+    conn.commit()
+    conn.close()
+    r = client.get("/api/jobs/j1/detail")
+    assert r.status_code == 200
+    assert 'data-context-uid="j1"' in r.text  # the textarea is present
+    assert "pasted JD text" in r.text  # pre-filled with the stored value
+    assert 'data-context-save="j1"' in r.text  # the Save button
+
+
+def test_tailor_folds_sent_context_into_jd(
+    client: TestClient, db_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from job_aggregator.dashboard import routes_jobs
+    from job_aggregator.resume.tailor import TailoredResume
+
+    captured: dict[str, str] = {}
+
+    def fake_tailor(profile: object, jd: str, **kw: object) -> TailoredResume:
+        captured["jd"] = jd
+        return TailoredResume(projects=[], skills=[], summary="", preservation=1.0, jd_keywords=[])
+
+    # capture the JD; make the PDF build a no-op RenderError so no LaTeX is needed (route degrades)
+    monkeypatch.setattr(routes_jobs, "tailor_resume", fake_tailor)
+    monkeypatch.setattr(
+        routes_jobs,
+        "compile_pdf",
+        lambda *a, **k: (_ for _ in ()).throw(routes_jobs.RenderError("no engine")),
+    )
+    r = client.post("/api/jobs/j1/tailor", data={"extra_context": "SECRET-CONTEXT-XYZ"})
+    assert r.status_code == 200  # preview partial returned even without a PDF
+    assert "SECRET-CONTEXT-XYZ" in captured["jd"]  # the pasted context reached tailoring
+    conn = connect(db_path)
+    assert (
+        conn.execute("SELECT extra_context FROM jobs WHERE job_uid='j1'").fetchone()[0]
+        == "SECRET-CONTEXT-XYZ"
+    )  # and was persisted
+    conn.close()

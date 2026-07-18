@@ -132,6 +132,35 @@
     }
   }
 
+  // ---- extra context: read the modal textarea for a job (empty string if absent) ----------
+  function contextValue(uid) {
+    const ta = document.querySelector("[data-context-uid=" + JSON.stringify(uid) + "]");
+    return ta ? ta.value : "";
+  }
+  function contextFormData(uid) {
+    const fd = new FormData();
+    fd.set("extra_context", contextValue(uid));
+    return fd;
+  }
+
+  // Save context explicitly (also auto-saved when Tailor/Apply send it).
+  async function saveContext(uid, btn) {
+    const status = document.querySelector("[data-context-status=" + JSON.stringify(uid) + "]");
+    if (btn) btn.disabled = true;
+    if (status) status.textContent = "Saving…";
+    try {
+      const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/context", {
+        method: "POST", body: contextFormData(uid),
+      });
+      const data = await res.json();
+      if (status) status.textContent = res.ok ? "Saved ✓" : (data.error && data.error.message) || "Failed";
+    } catch (e) {
+      if (status) status.textContent = "Save failed";
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   // ---- 6) tailor résumé (Track D Step 0) ----------------------------------
   // POST /api/jobs/{uid}/tailor and inject the returned preview partial into the modal footer.
   async function postTailor(uid, btn) {
@@ -142,6 +171,7 @@
       const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/tailor", {
         method: "POST",
         headers: { Accept: "text/html" },
+        body: contextFormData(uid), // fold the live context into the JD (also persists it)
       });
       if (!res.ok) {
         let msg = "Tailoring failed.";
@@ -166,6 +196,7 @@
     try {
       const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/apply", {
         method: "POST", headers: { Accept: "application/json" },
+        body: contextFormData(uid), // persist the live context so the CLI feeds it to the agent
       });
       const data = await res.json();
       alert(data.message || (res.ok ? "Launched." : "Could not launch."));
@@ -258,6 +289,13 @@
         if (url) window.open(url, "_blank", "noopener");
         postAction(uid, "apply");
       }
+      return;
+    }
+
+    // Save extra context for this job (feeds tailoring + apply)
+    const ctxBtn = ev.target.closest("[data-context-save]");
+    if (ctxBtn) {
+      saveContext(ctxBtn.getAttribute("data-context-save"), ctxBtn);
       return;
     }
 

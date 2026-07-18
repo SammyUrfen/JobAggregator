@@ -216,8 +216,17 @@ def cmd_apply(args: argparse.Namespace) -> int:
             "is_remote": bool(row["is_remote"]) if row["is_remote"] is not None else None,
         }
     )
+    # extra_context: the user's per-job notes / pasted posting (saved by the dashboard before it
+    # spawned us). Feeds tailoring + the agent's field-fill. Read defensively — the column only
+    # exists after the v3 migration, and a --db pointed at an old file may lack it.
+    extra_context = dict(row).get("extra_context")
     result = apply_to_job(
-        job, profile, cfg, driver=driver, backend=(ground_backend if args.llm else None)
+        job,
+        profile,
+        cfg,
+        driver=driver,
+        backend=(ground_backend if args.llm else None),
+        extra_context=extra_context,
     )
     # Mark applied only NOW — the fill completed and the human reviewed it in the browser.
     # (The dashboard deliberately does NOT set this on launch; a dead launch left phantom ✓s.)

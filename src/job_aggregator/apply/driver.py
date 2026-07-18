@@ -34,6 +34,9 @@ class ApplicationFields:
     linkedin: str | None = None
     github: str | None = None
     cover_note: str | None = None
+    # Free-text the user pasted for THIS job (full posting, notes, screening-question answers).
+    # NOT a form value — guidance the agent may use to answer specific fields (see text_map).
+    extra_context: str | None = None
 
     def text_map(self) -> dict[str, str]:
         """Non-file fields as a flat {logical_name: value} map (drops None + the résumé file)."""

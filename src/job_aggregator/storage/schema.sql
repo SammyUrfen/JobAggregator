@@ -60,7 +60,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   applied          INTEGER NOT NULL DEFAULT 0,
   bookmarked       INTEGER NOT NULL DEFAULT 0,
   hidden           INTEGER NOT NULL DEFAULT 0,
-  notes            TEXT
+  notes            TEXT,
+  -- user-supplied extra context (full posting text pasted from the site, field-fill hints);
+  -- feeds résumé tailoring AND the apply agent's form-filling. A user field: survives re-fetch.
+  extra_context    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status     ON jobs(status);

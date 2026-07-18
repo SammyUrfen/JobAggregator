@@ -48,7 +48,8 @@ def test_prompt_contains_reach_the_form_and_captcha_wait_rules() -> None:
     assert "Easy Apply" in prompt
     assert "captcha" in prompt.lower()
     assert "browser_wait_for" in prompt  # waits while the human solves it
-    assert "Do NOT try to solve a captcha yourself" in prompt
+    assert "credentials" in prompt  # anti-thrash: never type credentials / auto-solve walls
+    assert "thrashing logs the session out" in prompt
 
 
 def test_prompt_embeds_only_applicant_data_and_resume() -> None:
@@ -259,3 +260,29 @@ def test_load_cookies_millisecond_expiry_normalized(tmp_path: Path) -> None:
     _write_cookie_db(db, [("access_token", "S", ".unstop.com", "/", 1786605647691, 1, 1, 1)])
     (cookie,) = load_cookies_for_url("https://unstop.com/internships/x", db_path=db)
     assert cookie["expires"] == 1786605647  # seconds, within Playwright's valid range
+
+
+def test_prompt_includes_extra_context_when_present() -> None:
+    fields = ApplicationFields(
+        full_name="Test Person",
+        first_name="Test",
+        last_name="Person",
+        email="t@example.com",
+        resume_path="/tmp/r.pdf",
+        extra_context="Notice period: 0 days. Open to relocation. Expected stipend: 20k/month.",
+    )
+    prompt = build_apply_prompt(fields, "https://x.example/job")
+    assert "ADDITIONAL CONTEXT" in prompt
+    assert "Notice period: 0 days" in prompt
+    assert "never invent beyond it" in prompt  # still bound by the no-fabrication rule
+
+
+def test_prompt_omits_context_section_when_absent() -> None:
+    fields = ApplicationFields(
+        full_name="T",
+        first_name="T",
+        last_name="P",
+        email="t@e.com",
+        resume_path="/tmp/r.pdf",
+    )
+    assert "ADDITIONAL CONTEXT" not in build_apply_prompt(fields, "https://x/job")

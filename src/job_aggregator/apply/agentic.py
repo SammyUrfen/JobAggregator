@@ -78,13 +78,22 @@ def build_apply_prompt(fields: ApplicationFields, url: str) -> str:
     """The agent's instructions. The HARD RULES section is the safety contract — tests assert
     the never-submit and captcha-wait clauses stay present verbatim-ish."""
     data = dict(fields.text_map())
+    context = (fields.extra_context or "").strip()
+    context_block = (
+        f"\nADDITIONAL CONTEXT the user provided for THIS job (use it to answer specific fields "
+        f"— notice period, availability, screening questions, 'why this role', etc. — WHEN a "
+        f"field clearly asks for it; it is still subject to rule 4, never invent beyond it):\n"
+        f"{context}\n"
+        if context
+        else ""
+    )
     return f"""You are operating a browser (the mcp tools named mcp__{MCP_SERVER_NAME}__*) to
 fill ONE job application. The browser currently shows: {url}
 
 APPLICANT DATA (the ONLY facts you may enter):
 {json.dumps(data, indent=2)}
 Résumé file to upload where a resume/CV is asked: {fields.resume_path}
-
+{context_block}
 HARD RULES — read carefully:
 1. NEVER submit the application. Do not click Submit / Send / Apply now (final) /
    Review & submit, and never press Enter in a way that submits. Fill everything, then STOP.

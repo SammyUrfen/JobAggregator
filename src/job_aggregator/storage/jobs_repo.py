@@ -20,7 +20,7 @@ from job_aggregator.models.job import Job, JobStatus, SalaryBucket
 UpsertOutcome = Literal["new", "updated"]
 
 # Columns the user owns; a source re-fetch must never overwrite them.
-_USER_FLAG_FIELDS = frozenset({"applied", "bookmarked", "hidden", "notes"})
+_USER_FLAG_FIELDS = frozenset({"applied", "bookmarked", "hidden", "notes", "extra_context"})
 _BOOL_FLAG_FIELDS = frozenset({"applied", "bookmarked", "hidden"})
 
 # Dashboard pagination bounds.

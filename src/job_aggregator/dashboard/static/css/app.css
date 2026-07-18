@@ -257,6 +257,18 @@ body.modal-open { overflow: hidden; } /* freeze the page behind the modal */
 .apply-btn { background: var(--accent); color: var(--accent-contrast); }
 .jd-note { flex-basis: 100%; font-size: 11px; margin: var(--sp-1) 0 0; }
 .jd-tailor { flex-basis: 100%; }
+/* extra-context editor (feeds tailoring + apply) */
+.jd-context { margin: var(--sp-3) 0; }
+.jd-context-label { display: block; font-size: 11px; margin-bottom: var(--sp-1); }
+.jd-context-input {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  font: inherit; font-size: 13px; padding: var(--sp-2);
+  color: var(--text); background: var(--surface-2);
+  border: var(--border-w) solid var(--border); border-radius: var(--radius-inner);
+}
+.jd-context-actions { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
+.jd-context-status { font-size: 11px; }
+.btn-sm { padding: 3px 8px; font-size: 11px; }
 .tailor-result { background: var(--surface-2); border-radius: var(--radius-inner);
   padding: var(--sp-3); margin-top: var(--sp-2); font-size: 13px; }
 .tailor-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);

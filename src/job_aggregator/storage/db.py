@@ -20,7 +20,8 @@ from job_aggregator.paths import SCHEMA_SQL_PATH
 BUSY_TIMEOUT_MS = 5000
 # Forward-only schema version stamped in PRAGMA user_version; bump when a migration lands.
 # v2: jobs.is_internship column + title-regex backfill of existing rows.
-SCHEMA_VERSION = 2
+# v3: jobs.extra_context column (user context feeding tailoring + apply field-fill).
+SCHEMA_VERSION = 3
 
 _MEMORY_DB = ":memory:"
 
@@ -53,17 +54,28 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 def migrate(conn: sqlite3.Connection) -> None:
     """Forward-only migration keyed on `PRAGMA user_version`. v0->v1 just stamps the version;
-    v1->v2 adds jobs.is_internship and backfills it from titles."""
+    v1->v2 adds jobs.is_internship and backfills it from titles; v2->v3 adds jobs.extra_context."""
     row = conn.execute("PRAGMA user_version").fetchone()
     current: int = 0 if row is None else int(row[0])
-    _V2 = 2  # migration id: jobs.is_internship  # noqa: N806 - migration ids read as constants
+    _V2, _V3 = 2, 3  # migration ids  # noqa: N806 - read as constants
     if current < _V2:
         _migrate_v2_is_internship(conn)
+    if current < _V3:
+        _add_column_if_absent(conn, "extra_context", "TEXT")
     if current < SCHEMA_VERSION:
         # PRAGMA does not accept bound params; SCHEMA_VERSION is an int constant we control,
         # so interpolating it is safe (never user input).
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
+
+
+def _add_column_if_absent(conn: sqlite3.Connection, name: str, decl: str) -> None:
+    """Idempotent `ALTER TABLE jobs ADD COLUMN` — a fresh schema.sql already has the column, so
+    only an upgraded older DB needs it. `name`/`decl` are our own constants, never user input."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if name not in cols:
+        conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {decl}")
+    conn.commit()
 
 
 def _migrate_v2_is_internship(conn: sqlite3.Connection) -> None:

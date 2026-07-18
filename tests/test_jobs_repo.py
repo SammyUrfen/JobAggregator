@@ -136,6 +136,7 @@ def test_user_flags_preserved_across_upsert(
     jobs_repo.set_user_flag(conn, job.job_uid, "applied", True)
     jobs_repo.set_user_flag(conn, job.job_uid, "bookmarked", True)
     jobs_repo.set_user_flag(conn, job.job_uid, "notes", "referred by a friend")
+    jobs_repo.set_user_flag(conn, job.job_uid, "extra_context", "pasted JD + notice: immediate")
 
     run2 = runs_repo.start_run(conn, "manual", clock)
     jobs_repo.upsert_job(conn, job, run2, clock)
@@ -144,6 +145,7 @@ def test_user_flags_preserved_across_upsert(
     assert row["applied"] == 1
     assert row["bookmarked"] == 1
     assert row["notes"] == "referred by a friend"
+    assert row["extra_context"] == "pasted JD + notice: immediate"  # user context survives
 
 
 def test_first_seen_provenance_preserved_mutable_refreshed(

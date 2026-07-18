@@ -65,8 +65,11 @@ def _link_for(profile: Profile, *labels: str) -> str | None:
     return None
 
 
-def build_fields(profile: Profile, resume_pdf: str) -> ApplicationFields:
-    """Assemble the applicant field map from the profile + the tailored résumé PDF path."""
+def build_fields(
+    profile: Profile, resume_pdf: str, extra_context: str | None = None
+) -> ApplicationFields:
+    """Assemble the applicant field map from the profile + the tailored résumé PDF path.
+    `extra_context` is the user's per-job notes (carried through for the agent's field-fill)."""
     c = profile.contact
     first, last = _split_name(c.name)
     return ApplicationFields(
@@ -79,6 +82,7 @@ def build_fields(profile: Profile, resume_pdf: str) -> ApplicationFields:
         location=c.location,
         linkedin=_link_for(profile, "linkedin"),
         github=_link_for(profile, "github"),
+        extra_context=extra_context,
     )
 
 
@@ -93,8 +97,11 @@ def apply_to_job(
     *,
     driver: BrowserDriver,
     backend: AgentBackend | None = None,
+    extra_context: str | None = None,
 ) -> ApplyResult:
-    """Fill (never submit) one job's application. Raises AgentError if auto_submit/disabled."""
+    """Fill (never submit) one job's application. Raises AgentError if auto_submit/disabled.
+    `extra_context` (the user's per-job notes / pasted posting) feeds both the résumé tailoring
+    and the agent's field-fill — often the only real content for a thin-description source."""
     if cfg.apply.auto_submit:  # enforced, not just defaulted: NG1 — never blind auto-submit
         raise AgentError(
             "apply.auto_submit is not supported — you always review and submit yourself",
@@ -105,12 +112,14 @@ def apply_to_job(
 
     # 1. tailor + render a résumé PDF for THIS job (backend=None -> pure selection, no LLM/network)
     jd = f"{job.title}\n{job.description or ''}"
+    if extra_context and extra_context.strip():
+        jd += f"\n\nAdditional context:\n{extra_context.strip()}"
     tailored = tailor_resume(profile, jd, backend=backend, config=cfg.resume)
     pdf = resumes_dir() / f"{job.job_uid}.pdf"
     compile_pdf(render_latex(profile, tailored), pdf)  # RenderError propagates when no LaTeX engine
 
     # 2. field map + deterministic ATS selectors (None -> the driver uses its generic path)
-    fields = build_fields(profile, str(pdf))
+    fields = build_fields(profile, str(pdf), extra_context)
     ats = detect_ats(job.url)
     selectors = ats.selectors if ats else None
 
