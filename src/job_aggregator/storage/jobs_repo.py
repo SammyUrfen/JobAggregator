@@ -41,12 +41,12 @@ _UPSERT_SQL = """
 INSERT INTO jobs (
     job_uid, source, source_native_id, title, company, location, is_remote, url,
     description, salary_min, salary_max, salary_currency, salary_period, salary_raw,
-    salary_parsed, salary_bucket, match_score, posted_at,
+    salary_parsed, salary_bucket, match_score, is_internship, posted_at,
     first_seen_at, last_seen_at, last_seen_cycle, status
 ) VALUES (
     :job_uid, :source, :source_native_id, :title, :company, :location, :is_remote, :url,
     :description, :salary_min, :salary_max, :salary_currency, :salary_period, :salary_raw,
-    :salary_parsed, :salary_bucket, :match_score, :posted_at,
+    :salary_parsed, :salary_bucket, :match_score, :is_internship, :posted_at,
     :now, :now, :run_id, :status_new
 )
 ON CONFLICT(job_uid) DO UPDATE SET
@@ -58,7 +58,7 @@ ON CONFLICT(job_uid) DO UPDATE SET
     salary_currency=excluded.salary_currency, salary_period=excluded.salary_period,
     salary_raw=excluded.salary_raw, salary_parsed=excluded.salary_parsed,
     salary_bucket=excluded.salary_bucket, match_score=excluded.match_score,
-    posted_at=excluded.posted_at
+    is_internship=excluded.is_internship, posted_at=excluded.posted_at
     -- NOT updated: source, source_native_id, url, first_seen_at (provenance);
     --             applied, bookmarked, hidden, notes (USER FLAGS MUST SURVIVE UPSERTS)
 """
@@ -91,6 +91,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job, run_id: int, clock: Clock) ->
         "salary_parsed": int(job.salary_parsed),
         "salary_bucket": None if job.salary_bucket is None else job.salary_bucket.value,
         "match_score": job.match_score,
+        "is_internship": int(job.is_internship),
         "posted_at": None if job.posted_at is None else job.posted_at.isoformat(),
         "now": now,
         "run_id": run_id,
@@ -268,6 +269,7 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         salary_parsed=bool(row["salary_parsed"]),
         salary_bucket=None if bucket is None else SalaryBucket(bucket),
         match_score=row["match_score"],
+        is_internship=bool(row["is_internship"]),
         posted_at=None if posted is None else datetime.fromisoformat(posted),
     )
 

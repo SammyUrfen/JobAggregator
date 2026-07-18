@@ -53,7 +53,13 @@ class RawPosting:
 @dataclass
 class SourceResult:
     """The outcome of one source fetch within a cycle. `sub_results` lets one adapter report
-    multiple logical sub-sources (per-site/per-company) so the stale-guard is fine-grained."""
+    multiple logical sub-sources (per-site/per-company) so the stale-guard is fine-grained.
+
+    `exhaustive`: True when this fetch saw the source's COMPLETE current view (full board /
+    walk ended on the API's own empty-page signal). False for WINDOWED fetches (page caps,
+    results_wanted, hours_old windows): a job absent from a windowed fetch may still be live,
+    so expire_stale retires such jobs by posting AGE, never by mere absence (PLAN §4.5 refined).
+    """
 
     source: str
     succeeded: bool
@@ -62,11 +68,19 @@ class SourceResult:
     duration_ms: int = 0
     error: str | None = None
     sub_results: list[tuple[str, bool, int]] = field(default_factory=list)
+    exhaustive: bool = True
 
     @classmethod
-    def ok(cls, source: str, jobs: list[Job], *, duration_ms: int = 0) -> SourceResult:
+    def ok(
+        cls, source: str, jobs: list[Job], *, duration_ms: int = 0, exhaustive: bool = True
+    ) -> SourceResult:
         return cls(
-            source=source, succeeded=True, jobs=jobs, n_fetched=len(jobs), duration_ms=duration_ms
+            source=source,
+            succeeded=True,
+            jobs=jobs,
+            n_fetched=len(jobs),
+            duration_ms=duration_ms,
+            exhaustive=exhaustive,
         )
 
     @classmethod
@@ -190,19 +204,21 @@ def build_result(
     mapper: Callable[[Any], RawPosting | None],
     *,
     duration_ms: int = 0,
+    exhaustive: bool = True,
 ) -> SourceResult:
     """Tier-B builder encoding the suspicious-empty rule.
 
     `raw_items` = REAL postings (structural noise pre-stripped). Empty -> succeeded=False (a
     populated feed returning nothing is suspicious, so Phase 5 won't expire its jobs). A mapper
-    returning None drops a legitimately-filtered posting (still succeeded=True).
+    returning None drops a legitimately-filtered posting (still succeeded=True). `exhaustive`
+    mirrors SourceResult.exhaustive (windowed fetches must pass False).
     """
     if not raw_items:
         return SourceResult.failed(
             source, "suspicious empty: source returned 0 items", duration_ms=duration_ms
         )
     jobs = [to_job(r) for item in raw_items if (r := mapper(item)) is not None]
-    return SourceResult.ok(source, jobs, duration_ms=duration_ms)
+    return SourceResult.ok(source, jobs, duration_ms=duration_ms, exhaustive=exhaustive)
 
 
 def ats_sub_name(source: str, company: str) -> str:

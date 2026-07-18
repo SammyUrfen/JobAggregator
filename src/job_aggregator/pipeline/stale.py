@@ -26,6 +26,8 @@ def expire_stale(
     succeeded_sources: set[str],
     cfg: Config,
     clock: Clock,
+    *,
+    windowed_sources: set[str] | None = None,
 ) -> int:
     """For each SUCCEEDED source: mark jobs not seen this cycle 'stale', then 'deleted' once
     older than grace_days. Returns newly-stale + newly-deleted. Empty succeeded set -> 0.
@@ -34,17 +36,33 @@ def expire_stale(
     last_seen_cycle == run_id, so they are safe). Hard: status='stale' AND last_seen_at older
     than the grace cutoff. 'deleted' rows are never re-touched (idempotent); resurrection is
     upsert_job's job.
+
+    WINDOWED sources (in `windowed_sources` — page-capped/results_wanted/hours_old fetches):
+    absence from a truncated view is NOT evidence of death, so their unseen jobs only go stale
+    once the POSTING itself is older than schedule.windowed_retire_days (posted_at, falling
+    back to first_seen_at when the source gave no date). Without this, a still-live job that
+    drifted past page N of a "successful" fetch was silently deleted after grace_days.
     """
     grace_days = cfg.schedule.grace_days
     cutoff_iso = (clock.now() - timedelta(days=grace_days)).isoformat()
+    retire_iso = (clock.now() - timedelta(days=cfg.schedule.windowed_retire_days)).isoformat()
+    windowed = windowed_sources or set()
     cur = conn.cursor()
     n = 0
     for source in sorted(succeeded_sources):  # sorted -> reproducible
-        cur.execute(
-            "UPDATE jobs SET status='stale' "
-            "WHERE source=? AND last_seen_cycle<? AND status IN ('new','active')",
-            (source, run_id),
-        )
+        if source in windowed:
+            cur.execute(
+                "UPDATE jobs SET status='stale' "
+                "WHERE source=? AND last_seen_cycle<? AND status IN ('new','active') "
+                "AND julianday(COALESCE(posted_at, first_seen_at)) < julianday(?)",
+                (source, run_id, retire_iso),
+            )
+        else:
+            cur.execute(
+                "UPDATE jobs SET status='stale' "
+                "WHERE source=? AND last_seen_cycle<? AND status IN ('new','active')",
+                (source, run_id),
+            )
         n += cur.rowcount
         cur.execute(
             "UPDATE jobs SET status='deleted' "
@@ -53,5 +71,11 @@ def expire_stale(
         )
         n += cur.rowcount
     conn.commit()
-    logger.debug("expire_stale run=%d sources=%d expired=%d", run_id, len(succeeded_sources), n)
+    logger.debug(
+        "expire_stale run=%d sources=%d windowed=%d expired=%d",
+        run_id,
+        len(succeeded_sources),
+        len(windowed),
+        n,
+    )
     return n

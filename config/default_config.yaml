@@ -73,6 +73,13 @@ keywords:
     - reinforcement learning
     - inference
     - pytorch
+    # his broadest language + common Indian-internship listing categories — without these,
+    # "Java Developer Internship" / "Software Development" listings died as no_relevant_skill
+    - java
+    - spring
+    - sde
+    - software development
+    - software engineering
   # level_required: at least one must appear (title/description) when require_level is true.
   level_required:
     - intern
@@ -91,6 +98,18 @@ keywords:
     - director
     - "5+ years"
     - "clearance required"
+    # seniority markers the plain words miss — "Sr. Golang Developer", "Software Engineer III",
+    # "SDE-2", "Developer 4" all sailed through (15 of 116 kept Adzuna jobs; verified live)
+    - sr
+    - ii
+    - iii
+    - iv
+    - "sde-2"
+    - "sde 2"
+    - "sde-3"
+    - "sde 3"
+    - architect
+    - experienced
     # off-stack DOMAINS (title screen) — not the user's field
     - embedded
     - firmware
@@ -114,10 +133,46 @@ keywords:
     - recruiter
     - accountant
     - nursing
+    # web/app stacks that aren't his: frontend-only, CMS/ERP platforms, mobile, QA, support
+    - frontend
+    - front-end
+    - front end
+    - ui
+    - ux
+    - wordpress
+    - drupal
+    - sap
+    - salesforce
+    - aem
+    - ios
+    - android
+    - flutter
+    - php
+    - qa
+    - "quality assurance"
+    - "support engineer"
+    - "client success"
+    - "customer success"
+    - "business development"
+    - hr
+    - "human resources"
   # require_level=false: an explicit "intern/junior/new grad" word is NOT required — most real
   # entry/mid postings don't use those words, and require_level=true dropped ~half of all jobs.
   # Relevance comes from roles + must_have + exclude (which screens senior/staff/lead/etc.).
   require_level: false
+  # intern_queries: internship-targeted phrases ADDED to the role phrases on the query-driven
+  # sources (Adzuna `what`, Jooble keywords). Without them those sources structurally return
+  # mid/senior jobs (0/148 Jooble and 7/434 Adzuna fetched titles were internships).
+  intern_queries:
+    - software engineer intern
+    - backend intern
+    - software developer internship
+    - machine learning intern
+    - data engineer intern
+    - sde intern
+  # Drop a non-internship job whose DESCRIPTION demands more than this many years of experience
+  # (52% of kept jobs demanded >=3y before this gate). 0 disables. Internships are exempt.
+  max_experience_years: 2
 
 locations:
   - "Bengaluru, India"
@@ -133,6 +188,8 @@ salary:
   period: month
   min_remote: 30000        # INR/month floor for a REMOTE role to pass
   min_in_office: 80000     # INR/month floor for an IN-OFFICE role to pass
+  min_internship: 0        # floor for INTERNSHIPS (0 = never drop an internship on stipend —
+                           # the 30k remote floor was dropping real "SDE Intern" posts)
   on_missing: keep_and_flag   # keep_and_flag | drop  (most Indian internships have no salary)
   demote_in_office_if_unknown: true
   # Approximate FX rates for normalizing foreign pay to INR/month. Update as needed.
@@ -151,26 +208,35 @@ sources:
   jobspy:
     enabled: true
     sites: [linkedin, indeed]   # naukri=406 recaptcha, google=~10 results/query; both dropped
-    search_terms: ["backend intern", "systems intern", "ml intern", "golang intern"]
+    search_terms: ["software engineer intern", "backend intern", "machine learning intern"]
     location: "Bengaluru, India"
     country_indeed: india
-    is_remote: true
+    is_remote: false       # true strangled LinkedIn intern results (37 rows from 8 calls of 40);
+                           # Bengaluru internships are mostly on-site/hybrid anyway
     results_wanted: 40
     hours_old: 48
     proxies: []            # add ONLY for LinkedIn at volume (guest endpoint 429s ~10 pages/IP)
+    job_type: internship   # LinkedIn f_JT composes with hours_old; for Indeed the adapter drops
+                           # hours_old (Indeed can't combine the two — jobspy limitation)
+    linkedin_fetch_description: true  # LinkedIn rows have NO description otherwise, so the
+                           # must_have/role gates ran title-only and killed generic intern titles
   unstop:
     enabled: true
     opportunities: [internships, jobs]
-    search_terms: [backend, "machine learning"]
+    # Sent as the API's `searchTerm` (verified: narrows 10000 -> ~350 on-topic results). Without
+    # it the source pulled the generic all-domains firehose (travel/HR/sales internships).
+    search_terms: [backend, "machine learning", software]
     max_age_days: 30      # endpoint surfaces stale (2022) posts; recency filter is mandatory
-    max_pages: 5          # pages walked per opportunity before stopping (also stops when empty)
+    max_pages: 5          # pages walked per (opportunity x term) before stopping (also on empty)
   remoteok:
     enabled: true         # element[0] of the API is a legal notice — skip it; attribution required
   himalayas:
     enabled: true
     country: IN           # ~24h refresh: coverage, not freshness
   jobicy:
-    enabled: true
+    enabled: false        # structurally carries ~no internships and no India geo (both the
+                          # jobType and geo=india params 400 server-side — verified live); the
+                          # client-side internship filter therefore yields 0 forever
     job_type: internship
   adzuna:
     enabled: true
@@ -179,6 +245,18 @@ sources:
   jooble:
     enabled: true         # key via env JOOBLE_API_KEY
     max_pages: 10         # pages walked before stopping (also stops when the API returns none)
+  internshala:
+    enabled: true         # highest-density Indian internship source (listing-page HTML scrape;
+                          # robots-allowed paths, no API — see sources/internshala.py)
+    slugs:                # one filter page per slug; live counts 2026-07-18 in parentheses
+      - work-from-home-backend-development-internships      # (57)
+      - work-from-home-machine-learning-internships         # (86)
+      - work-from-home-data-science-internships             # (180)
+      - work-from-home-python-django-internships            # (33)
+      - backend-development-internship-in-bangalore         # (68)
+      - machine-learning-internship-in-bangalore            # (93)
+      - software-development-internship-in-bangalore        # (113)
+    max_pages: 3          # pages of ~50 walked per slug (also stops on a short page)
   remotive:
     enabled: false        # 24h-delayed + 4 calls/day cap; enable only if you need it
   ats:
@@ -214,6 +292,14 @@ resume:
 apply:
   enabled: false                # the browser apply agent (Track D) is opt-in; OFF by default
   auto_submit: false            # deliberately unsupported: you always review + submit yourself
+  engine: agentic               # Claude-driven browser session (clicks Apply/Easy Apply, waits
+                                # out captchas with you); "deterministic" = selector fill only
+  use_browser_cookies: true     # start the agent's Chromium logged in via your Zen/Firefox
+                                # cookies for the posting's domain (read-only copy, never logged)
+  browser_cookie_db: ""         # explicit cookies.sqlite path; empty = auto-discover (Zen first)
+  agent_timeout_s: 900          # one session's bound; generous so you can solve a captcha midway
+  agent_model: sonnet           # apply-session model; "" = your claude default (may be a slow
+                                # flagship — form filling doesn't need one)
 
 notify:
   on: new_only

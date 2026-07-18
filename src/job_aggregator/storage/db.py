@@ -19,7 +19,8 @@ from job_aggregator.paths import SCHEMA_SQL_PATH
 # 5s comfortably covers our single-writer workload; a run never contends with itself.
 BUSY_TIMEOUT_MS = 5000
 # Forward-only schema version stamped in PRAGMA user_version; bump when a migration lands.
-SCHEMA_VERSION = 1
+# v2: jobs.is_internship column + title-regex backfill of existing rows.
+SCHEMA_VERSION = 2
 
 _MEMORY_DB = ":memory:"
 
@@ -51,11 +52,31 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Forward-only migration keyed on `PRAGMA user_version`. v0->v1 just stamps the version."""
+    """Forward-only migration keyed on `PRAGMA user_version`. v0->v1 just stamps the version;
+    v1->v2 adds jobs.is_internship and backfills it from titles."""
     row = conn.execute("PRAGMA user_version").fetchone()
     current: int = 0 if row is None else int(row[0])
+    _V2 = 2  # migration id: jobs.is_internship  # noqa: N806 - migration ids read as constants
+    if current < _V2:
+        _migrate_v2_is_internship(conn)
     if current < SCHEMA_VERSION:
         # PRAGMA does not accept bound params; SCHEMA_VERSION is an int constant we control,
         # so interpolating it is safe (never user input).
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
+
+
+def _migrate_v2_is_internship(conn: sqlite3.Connection) -> None:
+    """Add jobs.is_internship (if absent — a fresh schema.sql already has it) and backfill from
+    titles with the SAME detector new rows use, so old and new rows agree."""
+    from job_aggregator.pipeline.filters import detect_internship
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if "is_internship" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN is_internship INTEGER NOT NULL DEFAULT 0")
+    # Index access, not r["title"]: migrate() must work on any connection, row_factory or not.
+    rows = conn.execute("SELECT job_uid, title FROM jobs").fetchall()
+    intern_uids = [(r[0],) for r in rows if detect_internship(r[1])]
+    if intern_uids:
+        conn.executemany("UPDATE jobs SET is_internship = 1 WHERE job_uid = ?", intern_uids)
+    conn.commit()

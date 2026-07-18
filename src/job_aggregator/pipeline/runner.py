@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from job_aggregator.config.schema import Config
 from job_aggregator.errors import RunInProgressError
-from job_aggregator.pipeline.filters import score_and_filter
+from job_aggregator.pipeline.filters import detect_internship, score_and_filter
 from job_aggregator.pipeline.salary import convert_bounds, salary_bucket
 from job_aggregator.pipeline.stale import expire_stale
 from job_aggregator.sources.base import Source, SourceResult
@@ -91,7 +91,9 @@ def run_cycle(
         conn.commit()
         n_new, n_updated, n_filtered = _filter_and_upsert(conn, run_id, results, cfg, clock)
         conn.commit()
-        n_expired = expire_stale(conn, run_id, succeeded, cfg, clock)
+        n_expired = expire_stale(
+            conn, run_id, succeeded, cfg, clock, windowed_sources=_windowed_names(results)
+        )
         resolved_notifiers = _notify(conn, run_id, cfg, clock, notifiers)  # step 8: per-job
         status = _run_status(n_ok, n_err)
         runs_repo.finish_run(
@@ -203,6 +205,18 @@ def _record_source_runs(
     return succeeded, n_ok, n_err, errors
 
 
+def _windowed_names(results: list[SourceResult]) -> set[str]:
+    """(Sub-)source names whose fetch was WINDOWED (exhaustive=False): their jobs must expire by
+    posting age, not by absence from a truncated view (see expire_stale)."""
+    windowed: set[str] = set()
+    for res in results:
+        if res.exhaustive:
+            continue
+        rows = res.sub_results or [(res.source, res.succeeded, res.n_fetched)]
+        windowed.update(name for name, ok, _ in rows if ok)
+    return windowed
+
+
 def _normalize_salary(job: Job, cfg: Config) -> None:
     """Convert a Job's salary to INR/month in place before bucketing.
 
@@ -239,6 +253,9 @@ def _filter_and_upsert(
         if not res.succeeded:
             continue  # never ingest a source we couldn't see
         for job in res.jobs:
+            # Stamp the internship flag FIRST — both the salary bucket (intern stipend floor)
+            # and the filter (intern role-gate relax + score boost) read it.
+            job.is_internship = detect_internship(job.title)
             _normalize_salary(job, cfg)  # to INR/month for ALL sources (Tier-B ships raw)
             job.salary_bucket = salary_bucket(job, cfg)  # uniform bucket for ALL sources
             verdict = score_and_filter(job, cfg)

@@ -51,7 +51,7 @@ def _retry_delay(resp: httpx.Response, attempt: int) -> float:
     return float(BASE_BACKOFF_S * (2**attempt))
 
 
-def get_json(
+def _request_with_retry(
     client: httpx.Client,
     url: str,
     *,
@@ -60,12 +60,10 @@ def get_json(
     json_body: dict[str, Any] | None = None,
     max_retries: int = DEFAULT_MAX_RETRIES,
     sleep: Callable[[float], None] = time.sleep,
-) -> Any:
-    """Fetch + JSON-decode with retry on connect/read errors and 429/5xx.
-
-    Raises SourceError on give-up, a non-retryable status (400/401/403/404), or a JSON decode
-    failure. A terminal 404 (e.g. an invalid ATS slug) is NOT retried.
-    """
+) -> httpx.Response:
+    """The shared retry/backoff loop behind get_json/get_text: retries connect/read errors and
+    429/5xx, returns the first 2xx response, raises SourceError otherwise (a terminal 404 —
+    e.g. an invalid ATS slug — is NOT retried)."""
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
@@ -88,14 +86,56 @@ def get_json(
             sleep(_retry_delay(resp, attempt))
             continue
         if 200 <= status < 300:
-            try:
-                return resp.json()
-            except ValueError as exc:
-                raise SourceError(
-                    f"invalid JSON from {url}", details={"url": url, "error": str(exc)}
-                ) from exc
+            return resp
         raise SourceError(f"HTTP {status} for {url}", details={"url": url, "status": status})
     raise SourceError(f"request failed for {url}", details={"url": url}) from last_exc
+
+
+def get_json(
+    client: httpx.Client,
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    method: str = "GET",
+    json_body: dict[str, Any] | None = None,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Any:
+    """Fetch + JSON-decode with retry on connect/read errors and 429/5xx.
+
+    Raises SourceError on give-up, a non-retryable status (400/401/403/404), or a JSON decode
+    failure. A terminal 404 (e.g. an invalid ATS slug) is NOT retried.
+    """
+    resp = _request_with_retry(
+        client,
+        url,
+        params=params,
+        method=method,
+        json_body=json_body,
+        max_retries=max_retries,
+        sleep=sleep,
+    )
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise SourceError(
+            f"invalid JSON from {url}", details={"url": url, "error": str(exc)}
+        ) from exc
+
+
+def get_text(
+    client: httpx.Client,
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    sleep: Callable[[float], None] = time.sleep,
+) -> str:
+    """get_json's twin for HTML endpoints (Internshala listing pages): identical retry/backoff
+    policy, returns the response body text instead of JSON-decoding it."""
+    return _request_with_retry(
+        client, url, params=params, max_retries=max_retries, sleep=sleep
+    ).text
 
 
 def paginate_until_empty(
@@ -104,12 +144,18 @@ def paginate_until_empty(
     max_pages: int,
     page_size: int | None = None,
     start_page: int = 1,
-) -> list[Any]:
+) -> tuple[list[Any], bool]:
     """Accumulate items page-by-page until the API signals completion or a safety cap.
 
     Stops on: an EMPTY page (the API's "no more postings" signal), a SHORT final page
     (< page_size, when page_size is known), or `max_pages` — whichever comes first. An unbounded
     "loop until empty" is a footgun (rate limits, runaway runs), so max_pages is a hard valve.
+
+    Returns (items, exhausted). `exhausted` is True only when the walk ended on the API's own
+    completion signal (empty/short page) — i.e. we saw the source's COMPLETE view. False means
+    the max_pages cap or a later-page error truncated it: absence from such a WINDOWED fetch is
+    NOT evidence a posting died, so stale-deletion must not treat it as one (the guard that used
+    to silently delete live jobs beyond page N).
 
     Failure policy: a SourceError on the FIRST page propagates (the source reports failed); a
     SourceError on a LATER page stops pagination but KEEPS the pages already fetched — a mid-run
@@ -123,10 +169,10 @@ def paginate_until_empty(
         except SourceError:
             if offset == 0:
                 raise  # first page failed -> the source genuinely failed
-            break  # keep earlier pages
+            return items, False  # keep earlier pages; view is truncated
         if not batch:
-            break
+            return items, True
         items.extend(batch)
         if page_size is not None and len(batch) < page_size:
-            break
-    return items
+            return items, True
+    return items, False  # stopped on the cap -> we did NOT see the full view

@@ -72,11 +72,16 @@ def convert_bounds(
 
 def salary_bucket(job: Job, cfg: Config) -> SalaryBucket:
     """PASS if the parsed INR/month figure meets the applicable floor, FAIL if below, else
-    UNKNOWN. Remote roles use `min_remote`; in-office use `min_in_office`."""
+    UNKNOWN. Internships use `min_internship` (stipends sit far below any full-time floor —
+    the remote floor was FAIL-dropping real "SDE Intern" posts); remote roles use `min_remote`;
+    in-office use `min_in_office`. Callers must stamp job.is_internship BEFORE bucketing."""
     if not job.salary_parsed or (job.salary_min is None and job.salary_max is None):
         return SalaryBucket.UNKNOWN
     rep = representative_inr(job.salary_min, job.salary_max)
     if rep is None:
         return SalaryBucket.UNKNOWN
-    floor = cfg.salary.min_remote if job.is_remote else cfg.salary.min_in_office
+    if job.is_internship:
+        floor = cfg.salary.min_internship
+    else:
+        floor = cfg.salary.min_remote if job.is_remote else cfg.salary.min_in_office
     return SalaryBucket.PASS if rep >= floor else SalaryBucket.FAIL

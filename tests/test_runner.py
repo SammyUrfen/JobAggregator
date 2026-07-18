@@ -307,3 +307,61 @@ def test_subsource_guard_is_per_site(
     }
     assert _row(conn, "l1")["status"] == "new"  # linkedin failed -> untouched
     assert _row(conn, "n1")["status"] == "stale"  # naukri ok, n1 not re-seen -> stale
+
+
+def test_runner_stamps_is_internship_and_boosts_score(
+    conn: sqlite3.Connection, clock: FixedClock, sample_config: Config
+) -> None:
+    """The runner derives is_internship from the title before bucketing/scoring, persists it,
+    and the internship outranks an otherwise-identical full-time job in the score sort."""
+    run_cycle(
+        conn,
+        sample_config,
+        clock,
+        "manual",
+        sources=[
+            FakeSource(
+                "src",
+                [
+                    make_job("i1", title="Backend Engineer Intern"),
+                    make_job("f1", title="Backend Engineer", company="Other Corp"),
+                ],
+            )
+        ],
+        notifiers=[],
+    )
+    intern, fulltime = _row(conn, "i1"), _row(conn, "f1")
+    assert intern["is_internship"] == 1
+    assert fulltime["is_internship"] == 0
+    assert intern["match_score"] > fulltime["match_score"]
+
+
+def test_runner_windowed_source_skips_absence_expiry_of_fresh_jobs(
+    conn: sqlite3.Connection, clock: FixedClock, sample_config: Config
+) -> None:
+    """A WINDOWED (exhaustive=False) source's job that merely fell out of the fetch window stays
+    active while its posting is young — the old absence-based expiry deleted live jobs."""
+    fresh = clock.now().isoformat()
+    run_cycle(
+        conn,
+        sample_config,
+        clock,
+        "manual",
+        sources=[FakeSource("win", [make_job("w1", source="win", posted_at=fresh)])],
+        notifiers=[],
+    )
+    run_cycle(  # next cycle: w1 absent, but the fetch is a window -> must NOT go stale
+        conn,
+        sample_config,
+        clock,
+        "manual",
+        sources=[
+            FakeSource(
+                "win",
+                [make_job("w2", source="win", title="Other Job", company="Elsewhere")],
+                exhaustive=False,
+            )
+        ],
+        notifiers=[],
+    )
+    assert _row(conn, "w1")["status"] == "new"  # untouched (young + windowed)

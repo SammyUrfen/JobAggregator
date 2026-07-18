@@ -59,6 +59,7 @@ class FakeSource(Source):
         error: str | None = None,
         duration_ms: int = 1,
         sub_results: list[tuple[str, bool, int]] | None = None,
+        exhaustive: bool = True,
     ) -> None:
         self._name = name
         self._jobs = jobs
@@ -66,6 +67,7 @@ class FakeSource(Source):
         self._error = error
         self._duration_ms = duration_ms
         self._sub_results = sub_results or []
+        self._exhaustive = exhaustive
 
     @property
     def name(self) -> str:  # type: ignore[override]
@@ -80,6 +82,7 @@ class FakeSource(Source):
             duration_ms=self._duration_ms,
             error=self._error,
             sub_results=list(self._sub_results),
+            exhaustive=self._exhaustive,
         )
 
 

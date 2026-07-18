@@ -49,3 +49,6 @@ class Job(BaseModel):
 
     posted_at: datetime | None = None
     match_score: float | None = Field(default=None, description="keyword/skill relevance score")
+    # Set by the runner from the title (pipeline.filters.detect_internship) before scoring;
+    # drives the internship score boost, the relaxed role gate, and the dashboard filter.
+    is_internship: bool = False

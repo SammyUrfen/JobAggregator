@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   salary_parsed    INTEGER NOT NULL DEFAULT 0,
   salary_bucket    TEXT,                 -- 'pass' | 'unknown' | 'fail'
   match_score      REAL,
+  is_internship    INTEGER NOT NULL DEFAULT 0,  -- title-detected internship/trainee flag
   posted_at        TEXT,                 -- ISO8601
   first_seen_at    TEXT NOT NULL,
   last_seen_at     TEXT NOT NULL,
