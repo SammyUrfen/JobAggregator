@@ -107,6 +107,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/job_aggregator/apply/session.py" = ["PLC0415"]
 "src/job_aggregator/apply/driver.py" = ["PLC0415"]
 "src/job_aggregator/apply/agentic.py" = ["PLC0415"]
+"src/job_aggregator/apply/procs.py" = ["PLC0415"]
 # the v2 migration borrows pipeline.filters.detect_internship for its backfill; importing it
 # lazily keeps the storage layer free of a module-load-time dependency on the pipeline layer.
 "src/job_aggregator/storage/db.py" = ["PLC0415"]

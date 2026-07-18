@@ -169,8 +169,42 @@
       });
       const data = await res.json();
       alert(data.message || (res.ok ? "Launched." : "Could not launch."));
+      if (res.ok && data.ok) pollApplyStatus(); // reveal the Stop button immediately
     } catch (e) { alert("Could not launch the apply agent."); }
   }
+
+  // ---- 9) apply kill switch: poll for live agents, show/hide the header Stop button --------
+  const applyStopBtn = () => document.getElementById("apply-stop-btn");
+
+  async function pollApplyStatus() {
+    const btn = applyStopBtn();
+    if (!btn) return;
+    try {
+      const res = await fetch("/api/apply/status", { headers: { Accept: "application/json" } });
+      const data = await res.json();
+      btn.hidden = !(data.running > 0);
+    } catch (e) { /* leave the button as-is on a transient error */ }
+  }
+
+  window.stopApply = async function () {
+    const btn = applyStopBtn();
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch("/api/apply/stop", { method: "POST", headers: { Accept: "application/json" } });
+      const data = await res.json();
+      alert(data.message || "Stop requested.");
+    } catch (e) {
+      alert("Could not reach the stop endpoint.");
+    } finally {
+      if (btn) btn.disabled = false;
+      pollApplyStatus();
+    }
+  };
+
+  // Poll every few seconds so the Stop button appears/disappears on its own — the kill switch
+  // must be reachable even after a page reload or with the modal closed.
+  setInterval(pollApplyStatus, 4000);
+  pollApplyStatus();
 
   // ---- 5) detail modal -----------------------------------------------------
   let lastOpener = null; // restore focus here when the modal closes (a11y)

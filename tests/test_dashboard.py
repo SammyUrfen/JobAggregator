@@ -780,3 +780,30 @@ def test_jobs_intern_filter(client: TestClient, db_path: str) -> None:
     assert '<span class="badge intern">' in r.text
     r_all = client.get("/")
     assert 'data-uid="j2"' in r_all.text  # unfiltered view still shows everything
+
+
+def test_apply_status_and_stop_endpoints(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from job_aggregator.apply import procs
+
+    # status reflects the live-pid count
+    monkeypatch.setattr(procs, "live_pids", lambda: [111, 222])
+    assert client.get("/api/apply/status").json() == {"running": 2}
+
+    # stop delegates to procs.stop_all and reports the count
+    stopped_calls: list[int] = []
+    monkeypatch.setattr(procs, "stop_all", lambda: (stopped_calls.append(1), 2)[1])
+    body = client.post("/api/apply/stop").json()
+    assert body["ok"] is True and body["stopped"] == 2
+    assert "Stopped 2 apply agent" in body["message"]
+    assert stopped_calls  # the endpoint actually invoked the kill switch
+
+
+def test_apply_stop_when_none_running(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_aggregator.apply import procs
+
+    monkeypatch.setattr(procs, "stop_all", lambda: 0)
+    body = client.post("/api/apply/stop").json()
+    assert body["stopped"] == 0
+    assert "No apply agent" in body["message"]

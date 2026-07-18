@@ -92,11 +92,13 @@ HARD RULES — read carefully:
 2. First REACH the form: this page is usually the posting, not the form. Click the apply
    affordance (Apply / Easy Apply / Quick Apply / Apply now). Navigating steps of a wizard
    with Next / Continue / Review is allowed — only the FINAL submitting action is forbidden.
-3. If a captcha, OTP, or login wall appears: the human is watching this very browser window
-   and will solve it. Say what you see, then wait with mcp__{MCP_SERVER_NAME}__browser_wait_for
-   (about 15 seconds at a time) and re-check with a fresh snapshot, repeating for up to
-   10 minutes. Continue once it clears. Do NOT try to solve a captcha yourself and do NOT
-   enter credentials.
+3. If a captcha, OTP, login wall, or "sign in" / "join now" page appears (common right after
+   clicking Easy Apply when the imported session isn't fully trusted): STOP acting. Do NOT
+   click sign-in/join buttons, do NOT navigate away, do NOT retry in a loop, and NEVER type
+   credentials — thrashing logs the session out further. Say exactly what you see, then wait
+   with mcp__{MCP_SERVER_NAME}__browser_wait_for (about 15 seconds) and re-snapshot, repeating
+   for up to 10 minutes while the human logs in IN THIS WINDOW. Only once the form is actually
+   visible again do you continue. If it never clears, report needs_login=true and stop.
 4. Enter ONLY the applicant data above. Leave anything you don't have empty (cover letter,
    demographic surveys, salary expectations) and report it as unfilled. Never invent an answer.
 5. If the page offers several apply paths, prefer the one that stays on this site

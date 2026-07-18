@@ -58,6 +58,9 @@ a:hover { text-decoration: underline; }
   color: var(--text);
   border: var(--border-w) solid var(--border);
 }
+/* Stop-apply kill switch: warn colour so it reads as "abort", distinct from the accent CTA. */
+.btn.danger { background: var(--warn); color: var(--accent-contrast); }
+.btn[disabled] { opacity: 0.55; cursor: default; }
 
 /* jobs grid + cards (Track B) */
 .jobs-grid {

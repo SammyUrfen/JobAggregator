@@ -33,6 +33,8 @@
       {%- endif -%}
       {%- if next_run_at %} · Next {{ next_run_at }}{% endif -%}
     </span>
+    {#- Kill switch for the apply agent — hidden until the poller sees a live agent (app.js). -#}
+    <button class="btn danger" id="apply-stop-btn" type="button" onclick="stopApply()" hidden>⏹ Stop apply</button>
     <button class="btn" id="run-now-btn" type="button" onclick="runNow()">Run now</button>
     <button class="btn secondary" type="button" onclick="toggleTheme()" aria-label="Toggle theme">◐</button>
   </header>

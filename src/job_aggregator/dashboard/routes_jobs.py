@@ -31,6 +31,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.datastructures import QueryParams
 
+from job_aggregator.apply import procs
 from job_aggregator.dashboard.deps import (
     SchedulerProtocol,
     get_config,
@@ -513,15 +514,23 @@ def _apply_preflight(uid: str) -> str | None:
 def _launch_apply(uid: str, db_path: str) -> subprocess.Popen[bytes]:
     """Spawn `job-aggregator apply <uid>` locally (opens a headful browser on the user's desktop).
     Output is captured to data/apply_last.log so an early death has a readable reason; the
-    process itself stays detached — the browser outlives this request for review + submit."""
+    process outlives this request for review + submit.
+
+    `start_new_session=True` puts the child in its OWN process group (not serve's), so the Stop
+    button can killpg the whole apply tree — python + claude + npx + chromium — without touching
+    the dashboard. The PID is registered so Stop can find it later (see apply.procs)."""
+
     log_path = data_dir() / _APPLY_LOG_NAME
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = open(log_path, "wb")  # noqa: SIM115 - handed to Popen; closed with the child
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "job_aggregator", "apply", uid, "--db", db_path],
         stdout=log_file,
         stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
+    procs.register_pid(proc.pid)
+    return proc
 
 
 # Lines that carry the actual failure in a python traceback / CLI error envelope. Matched
@@ -581,5 +590,26 @@ def job_apply(
     return {
         "ok": True,
         "message": "Chromium is opening with the form pre-filled — review, submit it yourself, "
-        "then close that window. (The agent marks the job applied when the fill completes.)",
+        "then close that window. (The agent marks the job applied when the fill completes.) "
+        "Use the Stop button in the header to abort it at any time.",
     }
+
+
+@router.get("/api/apply/status")
+def apply_status() -> dict[str, Any]:
+    """How many apply agents are live right now — drives the header Stop button's visibility."""
+
+    return {"running": len(procs.live_pids())}
+
+
+@router.post("/api/apply/stop")
+def apply_stop() -> dict[str, Any]:
+    """Abort every running apply agent (SIGTERM the whole tree, then SIGKILL survivors). The
+    kill switch for a haywire/stuck agent — works even when a browser window won't close or
+    never opened."""
+
+    stopped = procs.stop_all()
+    if stopped == 0:
+        return {"ok": True, "stopped": 0, "message": "No apply agent is running."}
+    plural = "s" if stopped != 1 else ""
+    return {"ok": True, "stopped": stopped, "message": f"Stopped {stopped} apply agent{plural}."}
