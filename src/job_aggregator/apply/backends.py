@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import httpx
@@ -71,7 +72,19 @@ class OpenAICompatibleBackend:
 class CodingAgentBackend:
     """Drive a local coding agent as a subprocess: it receives `system\\n\\nuser` on stdin and its
     stdout is the completion. `command` is the user's own config (single-user, localhost), run
-    without a shell."""
+    without a shell.
+
+    For a `claude` command the session is made LEAN — this is a stateless text completion, so no
+    MCP servers (the user's serena/playwright/… each spawn a subprocess for nothing here) and no
+    tools. Those flags are appended only for claude; any other agent runs verbatim."""
+
+    # Appended for a claude command: --strict-mcp-config with no --mcp-config loads ZERO MCP
+    # servers; --disallowedTools shuts off every built-in tool (pure text-in/text-out).
+    _CLAUDE_LEAN_FLAGS = (
+        "--strict-mcp-config",
+        "--disallowedTools",
+        "Bash,Edit,Write,Read,Glob,Grep,Task,WebFetch,WebSearch,NotebookEdit,TodoWrite",
+    )
 
     def __init__(self, command: list[str], *, timeout: float = _AGENT_TIMEOUT_S) -> None:
         if not command:
@@ -79,11 +92,20 @@ class CodingAgentBackend:
         self._command = command
         self._timeout = timeout
 
+    def _effective_command(self) -> list[str]:
+        """The command plus lean-session flags when it's a claude invocation (idempotent — skips
+        if the user already set --strict-mcp-config)."""
+        cmd = list(self._command)
+        is_claude = bool(cmd) and Path(cmd[0]).name == "claude"
+        if is_claude and "--strict-mcp-config" not in cmd:
+            cmd += self._CLAUDE_LEAN_FLAGS
+        return cmd
+
     def complete(self, system: str, user: str, *, temperature: float = 0.2) -> str:
         prompt = f"{system}\n\n{user}"
         try:
             proc = subprocess.run(
-                self._command,
+                self._effective_command(),
                 input=prompt,
                 capture_output=True,
                 text=True,

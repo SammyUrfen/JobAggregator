@@ -163,11 +163,11 @@ def test_compile_pdf_without_engine_raises(monkeypatch: pytest.MonkeyPatch, tmp_
         )
 
 
-# ── batched multi-project rewrite (one backend call) ─────────────────────────────────────
+# ── LLM selection + rewrite (one call, the model chooses AND words the projects) ─────────
 
 
-def test_batched_rewrite_attributes_projects_by_header() -> None:
-    # ONE backend call rewrites both projects; the ### <name> headers map bullets back.
+def test_llm_selects_and_words_both_projects() -> None:
+    # ONE backend call; the model returns both projects under ### headers, reworded.
     response = (
         "### WALterDB\n"
         "Engineered a C++20 database engine — 7K LOC, 91 tests.\n"
@@ -178,35 +178,71 @@ def test_batched_rewrite_attributes_projects_by_header() -> None:
     res = tailor_resume(
         _profile(_DB, _WEB), "database web", backend=fake, config=ResumeConfig(max_projects=2)
     )
-    assert fake.calls == 1  # batched: one subprocess/HTTP call for all projects
+    assert fake.calls == 1  # one call selects + words everything
     by_name = {p.name: p.bullets for p in res.projects}
     assert by_name["WALterDB"] == ["Engineered a C++20 database engine — 7K LOC, 91 tests."]
     assert by_name["Portfolio"] == ["Shipped a personal website spanning 3 pages."]
     assert res.used_llm is True
 
 
-def test_batched_rewrite_unattributable_falls_back() -> None:
-    # A reply with no project headers (and >1 project) can't be attributed -> keep all originals.
-    fake = FakeBackend("just prose, no headers at all")
-    res = tailor_resume(
-        _profile(_DB, _WEB), "database web", backend=fake, config=ResumeConfig(max_projects=2)
-    )
-    by_name = {p.name: p.bullets for p in res.projects}
-    assert by_name["WALterDB"] == _DB.bullets
-    assert by_name["Portfolio"] == _WEB.bullets
-    assert res.used_llm is False
-    assert any("could not be attributed" in f for f in res.flags)
-
-
-def test_batched_rewrite_missing_project_keeps_that_original() -> None:
-    # The model rewrote only WALterDB; Portfolio (omitted) keeps its original bullets.
+def test_llm_includes_only_the_projects_it_chose() -> None:
+    # The model returns ONLY WALterDB -> the résumé shows ONLY WALterDB (it chose it); Portfolio
+    # is not padded back in. This is the point of LLM selection.
     fake = FakeBackend("### WALterDB\nBuilt a C++20 database engine — 7K LOC, 91 tests.\n")
     res = tailor_resume(
         _profile(_DB, _WEB), "database web", backend=fake, config=ResumeConfig(max_projects=2)
     )
+    assert [p.name for p in res.projects] == ["WALterDB"]  # only the chosen one
+    assert res.used_llm is True
+
+
+def test_llm_selection_honours_the_models_order() -> None:
+    # WALterDB out-ranks Portfolio by keyword, but the model puts Portfolio first — its order wins.
+    fake = FakeBackend(
+        "### Portfolio\nShipped a personal website spanning 3 pages.\n"
+        "### WALterDB\nBuilt a C++20 database engine — 7K LOC, 91 tests.\n"
+    )
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database systems", backend=fake, config=ResumeConfig(max_projects=2)
+    )
+    assert [p.name for p in res.projects] == ["Portfolio", "WALterDB"]  # model's display order
+
+
+def test_llm_selection_caps_to_max_projects() -> None:
+    # The model over-returns 2; max_projects=1 keeps only the first.
+    fake = FakeBackend(
+        "### WALterDB\nBuilt a C++20 DB engine — 7K LOC, 91 tests.\n"
+        "### Portfolio\nShipped a 3-page website.\n"
+    )
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database", backend=fake, config=ResumeConfig(max_projects=1)
+    )
+    assert [p.name for p in res.projects] == ["WALterDB"]
+
+
+def test_llm_ignores_a_hallucinated_project_name() -> None:
+    # A '### Nonexistent' header the model invents is ignored; the real one is kept.
+    fake = FakeBackend(
+        "### Nonexistent Project\nSome made-up work.\n"
+        "### WALterDB\nBuilt a C++20 DB engine — 7K LOC, 91 tests.\n"
+    )
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database", backend=fake, config=ResumeConfig(max_projects=2)
+    )
+    assert [p.name for p in res.projects] == ["WALterDB"]  # invented header dropped
+
+
+def test_llm_unusable_output_falls_back_to_keyword_selection() -> None:
+    # A reply with no headers (and >1 candidate) can't be attributed -> deterministic ranking,
+    # bullets untouched.
+    fake = FakeBackend("just prose, no headers at all")
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database web", backend=fake, config=ResumeConfig(max_projects=2)
+    )
+    assert res.used_llm is False
     by_name = {p.name: p.bullets for p in res.projects}
-    assert by_name["Portfolio"] == _WEB.bullets  # untouched
-    assert res.used_llm is True  # WALterDB was reworded
+    assert by_name["WALterDB"] == _DB.bullets  # verbatim originals
+    assert any("keyword ranking" in f for f in res.flags)
 
 
 # ── try_build_backend degradation ─────────────────────────────────────────────────────────

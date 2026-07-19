@@ -63,6 +63,26 @@ def test_coding_agent_empty_command_is_configerror() -> None:
         CodingAgentBackend([])
 
 
+def test_coding_agent_claude_gets_lean_session_flags() -> None:
+    # A claude command is made lean: no MCP servers, no tools (a stateless text completion).
+    cmd = CodingAgentBackend(["claude", "-p", "--model", "sonnet"])._effective_command()
+    assert "--strict-mcp-config" in cmd  # loads ZERO MCP servers (no serena/playwright spawn)
+    assert "--disallowedTools" in cmd  # no built-in tools
+    assert cmd[:2] == ["claude", "-p"]  # user's command preserved, flags appended
+
+
+def test_coding_agent_lean_flags_are_idempotent() -> None:
+    # If the user already set --strict-mcp-config, don't double-append.
+    base = ["claude", "-p", "--strict-mcp-config"]
+    assert CodingAgentBackend(base)._effective_command() == base
+
+
+def test_coding_agent_non_claude_command_unchanged() -> None:
+    # A different agent (or `cat` in tests) runs verbatim — the claude-only flags aren't added.
+    assert CodingAgentBackend(["cat"])._effective_command() == ["cat"]
+    assert CodingAgentBackend(["codex", "exec"])._effective_command() == ["codex", "exec"]
+
+
 def test_build_backend_coding_agent() -> None:
     cfg = ResumeConfig(backend="coding_agent", agent_command=["cat"])
     assert isinstance(build_backend(cfg), CodingAgentBackend)

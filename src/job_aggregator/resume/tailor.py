@@ -159,11 +159,13 @@ class TailoredResume:
     used_llm: bool = False  # True when an LLM actually reworded bullets (vs pure selection)
 
 
-# Per-project delimiter for the batched rewrite. The model echoes '### <name>' back so we can
-# attribute rewritten bullets to the right project from ONE call — 4x fewer subprocess spawns
-# than per-project (each `claude -p` is ~12s), and the model tailors with the WHOLE résumé in
-# view (no repeating the same emphasis across projects).
+# Per-project delimiter. The model echoes '### <name>' so we can attribute its chosen+reworded
+# bullets back to a real project from ONE call — the LLM both SELECTS which projects to show and
+# words them for the job, seeing the WHOLE portfolio + JD at once (deterministic keyword ranking
+# is only the fallback).
 _PROJECT_MARK = "### "
+# Bound the candidate pool sent to the model (prompt size); the real profile has ~15 projects.
+_MAX_CANDIDATES = 40
 # Strip only true LIST numbering ("- ", "* ", "3. ", "12) ") — digits need the dot/bracket +
 # space. A greedy [-*•\d.\s]+ would amputate a bullet that LEADS with a metric ("91 Catch2
 # tests…" -> "Catch2 tests…"), silently losing facts.
@@ -174,71 +176,86 @@ def _strip_bullet(line: str) -> str:
     return _BULLET_PREFIX_RE.sub("", line).strip()
 
 
-def _rewrite_prompt(selected: list[Project], keywords: set[str]) -> tuple[str, str]:
-    """The batched (system, user) prompt: every selected project's bullets under a '### <name>'
-    header, asking for the same structure back."""
+def _select_prompt(
+    candidates: list[Project], job_description: str, max_projects: int
+) -> tuple[str, str]:
+    """The (system, user) prompt: give the model the JD + EVERY candidate project, ask it to pick
+    the most relevant `max_projects` and reword their bullets, echoing '### <name>' headers."""
     system = (
-        "You are a résumé editor. Rewrite each project's RESUME BULLETS to emphasize aspects "
-        "relevant to the TARGET KEYWORDS for the job. STRICT RULES: (1) Use ONLY facts present in "
-        "that project's own bullets — never invent numbers, technologies, companies, or outcomes. "
-        "(2) Keep every metric exactly as written. (3) Return the SAME number of bullets for each "
-        "project, one per line, no numbering, no commentary. (4) Echo each "
-        f"'{_PROJECT_MARK}<name>' header verbatim and in order; put only that project's rewritten "
-        "bullets beneath it."
+        "You are an expert résumé editor tailoring a candidate's résumé to ONE job. From the "
+        f"CANDIDATE PROJECTS, SELECT the {max_projects} most relevant to the JOB, then rewrite "
+        "each selected project's bullets to emphasize job-relevant aspects. STRICT RULES: "
+        "(1) Choose "
+        "ONLY from the given projects — never invent a project. (2) Use ONLY facts present in that "
+        "project's own bullets — never invent numbers, technologies, companies, or outcomes. "
+        "(3) Keep every metric exactly as written. (4) Output at most "
+        f"{max_projects} projects, most relevant first, each as a line '{_PROJECT_MARK}<exact "
+        "project name>' followed by its rewritten bullets (one per line, no numbering, no "
+        "commentary between projects)."
     )
-    parts = [f"TARGET KEYWORDS: {', '.join(sorted(keywords)[:40])}", ""]
-    for project in selected:
+    parts = [f"JOB:\n{job_description.strip()}", "", "CANDIDATE PROJECTS:"]
+    for project in candidates:
         parts.append(f"{_PROJECT_MARK}{project.name}")
+        if project.tagline:
+            parts.append(f"({project.tagline}; tech: {', '.join(project.tech)})")
         parts.extend(f"- {b}" for b in project.bullets)
         parts.append("")
     return system, "\n".join(parts)
 
 
-def _parse_rewrite(raw: str, selected: list[Project]) -> dict[str, list[str]]:
-    """Map project name -> rewritten bullet lines from the model output. Lenient: with NO headers
-    and a single project, treat every line as that project's bullets (keeps single-project
-    behaviour). Unattributable multi-project output yields {} so the caller falls back to source."""
+def _parse_rewrite(raw: str, candidates: list[Project]) -> dict[str, list[str]]:
+    """Ordered map project name -> reworded bullet lines from the model output. Lenient: with NO
+    headers and a single candidate, treat every line as that project's bullets. Unattributable
+    multi-project output yields {} so the caller falls back to deterministic selection."""
     sections: dict[str, list[str]] = {}
     current: str | None = None
     for line in raw.splitlines():
         stripped = line.strip()
         if stripped.startswith(_PROJECT_MARK):
             current = stripped[len(_PROJECT_MARK) :].strip()
-            sections[current] = []
-        elif current is not None and stripped:
+            sections.setdefault(current, [])
+        elif current is not None and stripped and not stripped.startswith("("):
             sections[current].append(_strip_bullet(stripped))
-    if not sections and len(selected) == 1:
+    if not sections and len(candidates) == 1:
         lines = [_strip_bullet(ln.strip()) for ln in raw.splitlines() if ln.strip()]
-        return {selected[0].name: lines}
+        return {candidates[0].name: lines}
     return sections
 
 
 def _guard_bullets(project: Project, candidates: list[str]) -> tuple[list[str], list[str]]:
-    """Anti-fabrication guard for ONE project: keep a rewritten bullet only if it introduces no
-    number absent from the source (structural, per arXiv 2605/2607); else fall back to the
-    truthful original. Also flags a rewrite that DROPS a metric. Returns (bullets, flags)."""
+    """Anti-fabrication guard for ONE project: keep each reworded bullet only if it introduces no
+    number absent from that project's source bullets (structural, per arXiv 2605/2607); reject the
+    rest. Count-agnostic (the model may condense/reorder) but capped at the source bullet count so
+    it can't pad. If nothing survives, fall back to the truthful originals. Returns (bullets,
+    flags)."""
     source_numbers: set[str] = set()
     for bullet in project.bullets:
         source_numbers |= _numbers(bullet)
     kept: list[str] = []
     flags: list[str] = []
-    for i, original in enumerate(project.bullets):
-        candidate = candidates[i] if i < len(candidates) else ""
-        if candidate and _numbers(candidate) <= source_numbers:
-            kept.append(candidate)
-            lost = _numbers(original) - _numbers(candidate)
-            if lost:
-                flags.append(
-                    f"{project.name}: rewrite dropped metric(s) {sorted(lost)} — review bullet "
-                    f"{i + 1}"
-                )
+    rejected = False
+    for candidate in candidates:
+        text = candidate.strip()
+        if not text:
+            continue
+        if _numbers(text) <= source_numbers:
+            kept.append(text)
         else:
-            kept.append(original)  # fall back to the truthful original
-            if candidate:
-                flags.append(
-                    f"{project.name}: rejected a rewrite that introduced unsupported facts"
-                )
+            rejected = True
+    kept = kept[: max(len(project.bullets), 1)]  # never output more bullets than the source
+    if rejected:
+        flags.append(f"{project.name}: rejected a rewrite that introduced unsupported facts")
+    if not kept:
+        kept = list(project.bullets)  # nothing usable -> the truthful originals
+        flags.append(f"{project.name}: rewrites unusable — kept original bullets")
     return kept, flags
+
+
+def _candidate_pool(profile: Profile, keywords: set[str]) -> list[Project]:
+    """Projects offered to the model for selection: keyword-ranked so the strongest candidates
+    lead, capped for prompt size. The model still chooses freely from the whole list."""
+    ranked = sorted(profile.projects, key=lambda p: score_project(p, keywords), reverse=True)
+    return ranked[:_MAX_CANDIDATES]
 
 
 def tailor_resume(
@@ -248,40 +265,47 @@ def tailor_resume(
     backend: AgentBackend | None = None,
     config: ResumeConfig | None = None,
 ) -> TailoredResume:
-    """Produce a truthful, JD-tailored résumé view. `backend=None` -> pure selection (no LLM).
-    With a backend, ONE call rewrites all selected projects' bullets (batched), each guarded by
-    the anti-fabrication check — a backend failure or an unattributable reply degrades to the
-    untouched originals, never a crash or a fabricated fact."""
+    """Produce a truthful, JD-tailored résumé view.
+
+    With a `backend`, ONE call lets the LLM both SELECT the most relevant projects from the whole
+    portfolio AND reword their bullets — every reworded bullet is number-guarded, and an unusable
+    reply or a backend failure degrades to deterministic keyword selection (never a crash or a
+    fabricated fact). `backend=None` -> pure deterministic selection, bullets verbatim."""
     cfg = config or ResumeConfig()
     keywords = jd_keywords(job_description)
-    selected = select_projects(profile, keywords, cfg.max_projects)
     skills = reorder_skills(profile.skills, keywords)
 
     flags: list[str] = []
-    sections: dict[str, list[str]] = {}
+    tailored: list[Project] = []
     used_llm = False
-    if backend is not None and selected:
-        system, user = _rewrite_prompt(selected, keywords)
+
+    if backend is not None and profile.projects:
+        candidates = _candidate_pool(profile, keywords)
+        by_name = {p.name: p for p in candidates}
+        system, user = _select_prompt(candidates, job_description, cfg.max_projects)
         try:
             raw = backend.complete(system, user, temperature=cfg.temperature)
-            sections = _parse_rewrite(raw, selected)
-            if not sections:
-                flags.append("tailoring: model output could not be attributed — kept originals")
+            sections = _parse_rewrite(raw, candidates)
         except AgentError as exc:  # degrade: a backend failure never breaks tailoring
+            sections = {}
             flags.append(f"tailoring skipped ({exc})")
-
-    tailored: list[Project] = []
-    for project in selected:
-        candidates = sections.get(project.name)
-        if candidates:
-            bullets, pflags = _guard_bullets(project, candidates)
-            flags.extend(pflags)
+        for name, cand_bullets in list(sections.items())[: cfg.max_projects]:
+            project = by_name.get(name)
+            if project is None:
+                continue  # a header the model invented / mangled — ignore it
+            bullets, gflags = _guard_bullets(project, cand_bullets)
+            flags.extend(gflags)
+            tailored.append(project.model_copy(update={"bullets": bullets}))
             used_llm = True
-        else:
-            bullets = list(project.bullets)
-        tailored.append(project.model_copy(update={"bullets": bullets}))
 
-    src = [b for p in selected for b in p.bullets]
+    if not tailored:  # no backend, or the LLM produced nothing usable -> keyword ranking
+        if backend is not None and not used_llm:
+            flags.append("tailoring: LLM selection unusable — used keyword ranking")
+        for project in select_projects(profile, keywords, cfg.max_projects):
+            tailored.append(project.model_copy(update={"bullets": list(project.bullets)}))
+
+    source_by_name = {p.name: p for p in profile.projects}
+    src = [b for p in tailored for b in source_by_name[p.name].bullets]
     out = [b for p in tailored for b in p.bullets]
     preservation = _preservation(src, out)
     if preservation < _PRESERVATION_FLOOR:

@@ -167,7 +167,7 @@
     const container = document.querySelector(".jd-tailor" + uidSel(uid));
     if (btn) { btn.disabled = true; btn.textContent = "Tailoring…"; }
     if (container) container.innerHTML =
-      '<p class="muted">Tailoring with the LLM — this can take ~30–60s with Claude Code…</p>';
+      '<p class="muted">Claude is choosing the best projects for this job and rewording them — ~1 minute…</p>';
     try {
       const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/tailor", {
         method: "POST",
