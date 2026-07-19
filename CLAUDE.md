@@ -171,10 +171,27 @@ drives an "LLM-reworded / deterministic" badge in the preview. Default `agent_co
 `--model sonnet` (inherited opus-1M was ~60s vs sonnet ~45s for the full profile; live-verified
 100% preservation). Stored config migrated on the live DB.
 
+**LLM now SELECTS projects too, + lean claude session (`90d3c4d`, 504 passed):** project
+selection was deterministic keyword-ranking (the LLM only reworded the pre-selected 4). Now with
+a backend the LLM does BOTH: `tailor_resume` sends the JD + ALL portfolio projects
+(`_candidate_pool`, keyword-ranked, capped 40) and the model picks the `max_projects` most
+relevant AND rewords them in one call (`_select_prompt` → `### <name>` sections → `_parse_rewrite`
+→ per-project `_guard_bullets`, now count-agnostic + capped at source count). Un-chosen projects
+don't appear; a hallucinated/unknown header is ignored; an unusable reply degrades to deterministic
+`select_projects` (flagged). Preservation compares each tailored project to ITS source. Guard is
+still numeric-only (non-numeric claims aren't auto-verified — `used_llm` prompts review; badge
+now "LLM-chosen + reworded"). **Lean session:** `CodingAgentBackend._effective_command` appends
+`--strict-mcp-config` (loads ZERO MCP servers — no serena/playwright subprocess spawn) +
+`--disallowedTools …` for a claude command (a stateless text completion needs neither); idempotent,
+claude-only. Live-verified: for an ML JD Claude chose TraceLens/NoteLens/ML-from-Scratch/
+Form-Controller (swapped one vs keyword ranking), 100% preservation, ~60s (reads all 15 projects —
+UI note says ~1 min).
+
 **Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
 by the user (headless smokes + a real internshala launch that was Stop-tested); LinkedIn Easy
-Apply remains best-effort (anti-bot); résumé tailoring blocks ~45s on the LLM (one call, honest
-UI note); dashboard auth / cross-process run-lock / fuzzy-dedup remain documented limitations.
+Apply remains best-effort (anti-bot); résumé tailoring blocks ~60s on the LLM (one call reading
+the whole portfolio, honest UI note); the anti-fabrication guard is numeric-only; dashboard auth /
+cross-process run-lock / fuzzy-dedup remain documented limitations.
 
 **Auto-apply extension (post-v1) — in progress.** Design + verified research in
 `docs/auto_apply_design.md`. Locked decisions: fill→**you review→you submit** (never blind
