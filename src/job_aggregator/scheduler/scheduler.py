@@ -36,11 +36,18 @@ TRIGGER_CATCHUP = "startup_catchup"
 
 DAILY_JOB_ID = "daily_cycle"
 IMMEDIATE_JOB_ID = "immediate_cycle"
+CATCHUP_POLL_JOB_ID = "catchup_poll"
 # Generous misfire grace: a laptop asleep at run_hour still fires on wake within the window.
 MISFIRE_GRACE_SECONDS = 3600
 MAX_INSTANCES = 1
 # Catch up if the last COMPLETED run (success OR partial) is older than this threshold.
 CATCH_UP_THRESHOLD = timedelta(hours=24)
+# How often to re-check "is a fetch overdue?" The daily cron only fires at run_hour with a 1h
+# misfire grace, so a laptop asleep THROUGH run_hour and woken hours later (past the grace) would
+# skip that day entirely with no catch-up until the process restarts. This periodic due-check is
+# the safety net: after wake the interval fires on its next tick and catches up. Cheap (one DB
+# read per tick; a cycle runs only when >24h overdue, so at most once/day).
+CATCHUP_POLL_MINUTES = 30
 
 
 class JobScheduler:
@@ -51,9 +58,11 @@ class JobScheduler:
         self._scheduler: BackgroundScheduler | None = None
 
     def start(self) -> None:
-        """Register the daily cron job, start the scheduler, then run startup catch-up."""
+        """Register the daily cron + the periodic catch-up poll, start the scheduler, then run
+        startup catch-up."""
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.interval import IntervalTrigger
 
         from job_aggregator.config.store import load_effective_config
         from job_aggregator.storage import runs_repo
@@ -78,8 +87,25 @@ class JobScheduler:
             coalesce=True,
             max_instances=MAX_INSTANCES,
         )
+        # Safety net for sleep/wake + cron misfires (see CATCHUP_POLL_MINUTES): re-check whether a
+        # fetch is overdue on a fixed interval. misfire_grace_time=None so the FIRST tick after the
+        # laptop wakes fires regardless of how long it slept; coalesce collapses backlog to one.
+        self._scheduler.add_job(
+            self._catch_up_if_due,
+            trigger=IntervalTrigger(minutes=CATCHUP_POLL_MINUTES),
+            args=[TRIGGER_CATCHUP],
+            id=CATCHUP_POLL_JOB_ID,
+            replace_existing=True,
+            misfire_grace_time=None,
+            coalesce=True,
+            max_instances=MAX_INSTANCES,
+        )
         self._scheduler.start()
-        log.info("scheduler started; daily run at %02d:00 local", run_hour)
+        log.info(
+            "scheduler started; daily run at %02d:00 local, catch-up poll every %dm",
+            run_hour,
+            CATCHUP_POLL_MINUTES,
+        )
         self.catch_up_on_startup()
 
     def stop(self) -> None:
@@ -98,29 +124,42 @@ class JobScheduler:
         result: datetime | None = getattr(job, "next_run_time", None)
         return result
 
-    def catch_up_on_startup(self) -> None:
-        """Submit an immediate run if the last COMPLETED run (success or partial) is older than ~24h
-        (the sleeping-laptop reality). Gating on 'completed' rather than strict success means a
-        permanently-blocked source (himalayas 403 / naukri recaptcha) — which keeps every run
-        'partial' — no longer forces a full re-run on every `serve` boot; the daily cron still
-        retries it. A 'failed' run (nothing fetched) is excluded, so it still forces catch-up.
-        """
+    def _is_catch_up_due(self) -> bool:
+        """True if catch-up is enabled AND the last COMPLETED run (success or partial) is older
+        than ~24h. Gating on 'completed' rather than strict success means a permanently-blocked
+        source (himalayas 403 / naukri recaptcha) — which keeps every run 'partial' — doesn't
+        force a re-run every check; a 'failed' run (nothing fetched) is excluded so it still does.
+        Opens + closes its own connection (called from the scheduler's pool thread)."""
         from job_aggregator.config.store import load_effective_config
         from job_aggregator.storage import runs_repo
 
         conn = cast("sqlite3.Connection", self._connect_fn())
         try:
             if not load_effective_config(conn).schedule.catch_up_on_startup:
-                log.info("startup catch-up disabled; skipping")
-                return
+                return False
             last_row = runs_repo.last_completed_run(conn)
         finally:
             conn.close()
-        last = _run_finished_at(last_row)
-        if self._should_catch_up(last, self._clock.now(), CATCH_UP_THRESHOLD):
+        return self._should_catch_up(
+            _run_finished_at(last_row), self._clock.now(), CATCH_UP_THRESHOLD
+        )
+
+    def catch_up_on_startup(self) -> None:
+        """Submit an immediate run at process start if a fetch is overdue (the sleeping-laptop
+        reality). The periodic poll (below) covers a sleep/wake WHILE the process keeps running."""
+        if self._is_catch_up_due():
             self._submit_async(TRIGGER_CATCHUP)
         else:
-            log.info("recent run completed at %s; catch-up not needed", last)
+            log.info("recent run completed; startup catch-up not needed")
+
+    def _catch_up_if_due(self, trigger: str) -> None:
+        """Periodic (every CATCHUP_POLL_MINUTES) due-check — the sleep/wake + cron-misfire safety
+        net. Runs SYNCHRONOUSLY on the scheduler pool thread when overdue; the run-lock + DB
+        current-run check make it a no-op if the daily cron (or another poll) is already running,
+        so it can never double-fetch. Never raises (a failed cycle is logged by _run_locked)."""
+        if self._is_catch_up_due():
+            log.info("catch-up poll: a fetch is overdue; running now")
+            self._run_locked(trigger)
 
     @staticmethod
     def _should_catch_up(

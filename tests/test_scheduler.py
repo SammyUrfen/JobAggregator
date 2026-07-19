@@ -109,6 +109,50 @@ def test_catch_up_disabled_never_submits(monkeypatch: pytest.MonkeyPatch) -> Non
     assert fake.jobs == []
 
 
+def test_periodic_catchup_runs_cycle_when_overdue(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The sleep/wake safety net: on its interval tick, an overdue check runs a cycle directly
+    # (synchronously via the run-lock), not just at startup.
+    ran: list[str] = []
+    monkeypatch.setattr(
+        runner,
+        "run_cycle",
+        lambda conn, cfg, clock, trigger: (ran.append(trigger), _ok_summary(9))[1],
+    )
+    monkeypatch.setattr(store, "load_effective_config", lambda conn: _cfg(catch_up=True))
+    monkeypatch.setattr(runs_repo, "current_run", lambda conn: None)
+    monkeypatch.setattr(runs_repo, "last_completed_run", lambda conn: None)  # never ran -> overdue
+    _sched()._catch_up_if_due(TRIGGER_CATCHUP)
+    assert ran == [TRIGGER_CATCHUP]
+
+
+def test_periodic_catchup_is_noop_when_recent(monkeypatch: pytest.MonkeyPatch) -> None:
+    ran: list[int] = []
+    monkeypatch.setattr(runner, "run_cycle", lambda *a, **k: (ran.append(1), _ok_summary())[1])
+    recent = (NOW - timedelta(hours=1)).isoformat()
+    monkeypatch.setattr(store, "load_effective_config", lambda conn: _cfg(catch_up=True))
+    monkeypatch.setattr(
+        runs_repo,
+        "last_completed_run",
+        lambda conn: {"finished_at": recent, "started_at": recent},
+    )
+    _sched()._catch_up_if_due(TRIGGER_CATCHUP)
+    assert ran == []  # a recent run -> the poll does nothing (no double-fetch)
+
+
+def test_start_registers_daily_and_catchup_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_aggregator.scheduler.scheduler import CATCHUP_POLL_JOB_ID, DAILY_JOB_ID
+
+    fake = _FakeScheduler()
+    fake.start = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setattr(store, "load_effective_config", lambda conn: _cfg(catch_up=False))
+    monkeypatch.setattr(runs_repo, "reconcile_orphan_runs", lambda conn, clock: 0)
+    sched = _sched()
+    sched._scheduler = fake
+    sched.start()
+    ids = {j["id"] for j in fake.jobs}
+    assert {DAILY_JOB_ID, CATCHUP_POLL_JOB_ID} <= ids  # both the cron + the safety-net poll
+
+
 def test_lock_prevents_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
     entered = threading.Event()
     release = threading.Event()
