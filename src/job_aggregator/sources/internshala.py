@@ -20,6 +20,7 @@ import time
 from datetime import datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -98,11 +99,25 @@ def parse_detail_description(html: str) -> str | None:
     return inner[:_MAX_DETAIL_CHARS] or None
 
 
+def _is_internshala_detail_url(url: str) -> bool:
+    """True only for a real Internshala detail page. Checks the parsed HOST (not a substring) so a
+    URL like http://evil.com/internshala.com/internship/detail/x can't fool the fetch into an
+    SSRF — and the scheme must be http(s), never file://. Belt-and-suspenders: stored URLs come
+    from the source, but the fetcher validates its own input."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return (
+        parsed.scheme in ("http", "https")
+        and (host == "internshala.com" or host.endswith(".internshala.com"))
+        and parsed.path.startswith("/internship/detail/")
+    )
+
+
 def fetch_detail_description(url: str) -> str | None:
     """The real Internshala JD for one posting URL, fetched live (best-effort). Any failure —
     non-Internshala URL, network error, selector gone — returns None so the caller keeps the
     listing slug. Human-triggered (called when the user opens the job), never in the daily run."""
-    if "internshala.com/internship/detail/" not in url:
+    if not _is_internshala_detail_url(url):
         return None
     try:
         with make_client() as client:

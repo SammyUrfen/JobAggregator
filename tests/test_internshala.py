@@ -238,3 +238,22 @@ def test_fetch_detail_description_rejects_non_detail_url() -> None:
     # a listing URL (not a /internship/detail/ page) -> None without any network call
     assert fetch_detail_description("https://internshala.com/internships/backend/") is None
     assert fetch_detail_description("https://example.com/x") is None
+
+
+@pytest.mark.parametrize(
+    ("url", "ok"),
+    [
+        ("https://internshala.com/internship/detail/x-1", True),
+        ("http://internshala.com/internship/detail/x", True),
+        # SSRF vectors the HOST check (not a substring) must reject:
+        ("http://evil.com/internshala.com/internship/detail/x", False),
+        ("http://internshala.com.evil.com/internship/detail/x", False),
+        ("file:///etc/passwd", False),
+        ("http://169.254.169.254/internship/detail/x", False),
+        ("https://internshala.com/internships/backend/", False),  # wrong path
+    ],
+)
+def test_is_internshala_detail_url_host_checked(url: str, ok: bool) -> None:
+    from job_aggregator.sources.internshala import _is_internshala_detail_url
+
+    assert _is_internshala_detail_url(url) is ok
