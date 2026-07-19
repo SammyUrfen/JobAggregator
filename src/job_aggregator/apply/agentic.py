@@ -287,12 +287,16 @@ class AgenticSession:
             ) as fh:
                 json.dump(mcp_config(port), fh)
                 cfg_path = fh.name
-            stream = self._run_claude(
-                build_claude_command(
-                    self.claude_bin, build_apply_prompt(fields, url), cfg_path, self.model
+            try:
+                stream = self._run_claude(
+                    build_claude_command(
+                        self.claude_bin, build_apply_prompt(fields, url), cfg_path, self.model
+                    )
                 )
-            )
-            Path(cfg_path).unlink(missing_ok=True)
+            finally:
+                # Clean up even when the agent times out/errors (the file is just a localhost CDP
+                # config — no secret — but don't litter /tmp on the error path).
+                Path(cfg_path).unlink(missing_ok=True)
 
             output, agent_errored = extract_result_text(stream)
             if agent_errored:
