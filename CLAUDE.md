@@ -156,10 +156,25 @@ apply agent: `ApplicationFields.extra_context` → `build_apply_prompt` "ADDITIO
 (subject to the no-fabrication rule) so the agent can fill notice-period/availability/screening
 fields. CLI reads `dict(row).get("extra_context")` and threads it through `apply_to_job`.
 
+**Résumé tailoring now uses the LLM by default (`6e6a0ff`, 498 passed):** the dashboard Tailor
+button was deterministic-only — `_tailor_backend` hard-returned None, so Claude Code was never
+invoked (only the `--llm` CLI flag triggered it). Now `_tailor_backend` builds the configured
+backend via `try_build_backend` (returns None on a missing CLI/key → degrades to deterministic,
+never a 500); apply's tailoring likewise uses it by default. New config `resume.tailor_with_llm`
+(default True) is the master switch + a config-UI checkbox; `resume.backend` (default now
+**coding_agent**, was openai_compatible) picks Claude Code vs an OpenAI endpoint. The rewrite is
+**batched** into ONE `backend.complete()` call for all selected projects (was per-project — 4×
+the `claude -p` spawns) via `### <name>` headers parsed back by `_parse_rewrite` (lenient:
+single-project + headerless still works; unattributable multi-project → keep originals + flag).
+Anti-fabrication guard unchanged (per-project number containment). `TailoredResume.used_llm`
+drives an "LLM-reworded / deterministic" badge in the preview. Default `agent_command` gained
+`--model sonnet` (inherited opus-1M was ~60s vs sonnet ~45s for the full profile; live-verified
+100% preservation). Stored config migrated on the live DB.
+
 **Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
 by the user (headless smokes + a real internshala launch that was Stop-tested); LinkedIn Easy
-Apply remains best-effort (anti-bot); dashboard auth / cross-process run-lock / fuzzy-dedup remain
-documented limitations.
+Apply remains best-effort (anti-bot); résumé tailoring blocks ~45s on the LLM (one call, honest
+UI note); dashboard auth / cross-process run-lock / fuzzy-dedup remain documented limitations.
 
 **Auto-apply extension (post-v1) — in progress.** Design + verified research in
 `docs/auto_apply_design.md`. Locked decisions: fill→**you review→you submit** (never blind
