@@ -201,3 +201,26 @@ def test_trigger_now_returns_run_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runs_repo, "current_run", lambda conn: None)
     sched = _sched()
     assert sched.trigger_now("manual") == 42
+
+
+def test_reschedule_daily_updates_cron(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ReschedFake(_FakeScheduler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.rescheduled: list[Any] = []
+
+        def reschedule_job(self, job_id: str, trigger: Any) -> None:
+            self.rescheduled.append((job_id, trigger))
+
+    fake = _ReschedFake()
+    sched = _sched()
+    sched._scheduler = fake
+    sched.reschedule_daily(9)
+    assert len(fake.rescheduled) == 1
+    from job_aggregator.scheduler.scheduler import DAILY_JOB_ID
+
+    assert fake.rescheduled[0][0] == DAILY_JOB_ID
+
+
+def test_reschedule_daily_noop_when_not_running() -> None:
+    _sched().reschedule_daily(9)  # no scheduler started -> must not raise

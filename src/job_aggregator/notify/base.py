@@ -84,5 +84,10 @@ def build_notifiers(cfg: Config, clock: Clock | None = None) -> list[Notifier]:
     if cfg.notify.email.enabled:
         out.append(EmailNotifier())
     if cfg.notify.rss.enabled:
-        out.append(RssNotifier(clock=resolved_clock))
+        # Honor cfg.notify.rss.path (it was silently ignored — the notifier always wrote to the
+        # default feed_path()). An empty path falls back to the default inside RssNotifier.
+        from pathlib import Path
+
+        rss_path = cfg.notify.rss.path.strip()
+        out.append(RssNotifier(clock=resolved_clock, out_path=Path(rss_path) if rss_path else None))
     return out

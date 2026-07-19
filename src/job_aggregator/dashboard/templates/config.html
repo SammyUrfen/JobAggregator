@@ -83,7 +83,7 @@
       <textarea id="keywords_level_required" name="keywords_level_required" rows="2">{{ config.keywords.level_required | join('\n') }}</textarea>
     </div>
     <div class="field">
-      <label for="keywords_intern_queries">intern_queries (extra internship searches on Adzuna/Jooble)</label>
+      <label for="keywords_intern_queries">intern_queries (extra internship keyword searches on Jooble; Adzuna has its own intern walk)</label>
       <textarea id="keywords_intern_queries" name="keywords_intern_queries" rows="3">{{ config.keywords.intern_queries | join('\n') }}</textarea>
     </div>
     <div class="field">
@@ -106,6 +106,14 @@
     <label class="chk"><input type="checkbox" name="src_{{ name }}" value="true"
       {% if config.sources[name].enabled %}checked{% endif %}> {{ name }}</label>
     {% endfor %}
+    <div class="field">
+      <label for="jobspy_search_terms">jobspy search_terms (per-site scrape terms, e.g. "backend intern")</label>
+      <textarea id="jobspy_search_terms" name="jobspy_search_terms" rows="2">{{ config.sources.jobspy.search_terms | join('\n') }}</textarea>
+    </div>
+    <div class="field">
+      <label for="unstop_search_terms">unstop search_terms (API searchTerm, e.g. "backend", "machine learning")</label>
+      <textarea id="unstop_search_terms" name="unstop_search_terms" rows="2">{{ config.sources.unstop.search_terms | join('\n') }}</textarea>
+    </div>
   </fieldset>
 
   <fieldset>
@@ -148,12 +156,20 @@
           {% if config.resume.backend == 'openai_compatible' %}selected{% endif %}>openai_compatible — HTTP endpoint (needs a key in .env)</option>
       </select>
     </div>
+    <div class="field">
+      <label for="resume_base_url">openai_compatible base_url (used only when backend = openai_compatible)</label>
+      <input type="text" id="resume_base_url" name="resume_base_url" value="{{ config.resume.base_url }}">
+    </div>
+    <div class="field">
+      <label for="resume_model">model</label>
+      <input type="text" id="resume_model" name="resume_model" value="{{ config.resume.model }}">
+    </div>
     <p class="muted">Résumé tailoring uses this backend (Claude Code by default — no API key) to
       reword bullets behind an anti-fabrication guard; a missing CLI/key degrades to deterministic
-      selection. For <code>openai_compatible</code> set <code>base_url</code>/<code>model</code> in
-      <code>config/default_config.yaml</code> and the key in <code>.env</code>. Never auto-submits —
-      you review + submit. Apply runs locally + headful: install <code>pip install -e '.[apply]'</code>
-      and set <code>JOBAGG_SESSION_KEY</code> in <code>.env</code>.</p>
+      selection. For <code>openai_compatible</code> the key comes from <code>.env</code>
+      (<code>OPENAI_API_KEY</code>). Never auto-submits — you review + submit. Apply runs locally +
+      headful: install <code>pip install -e '.[apply]'</code> and set
+      <code>JOBAGG_SESSION_KEY</code> in <code>.env</code>.</p>
   </fieldset>
 
   <button class="btn" type="submit">Save config</button>

@@ -44,12 +44,16 @@ class FakeScheduler:
         self.busy = busy
         self.started = False
         self.stopped = False
+        self.rescheduled: list[int] = []
 
     def start(self) -> None:
         self.started = True
 
     def stop(self) -> None:
         self.stopped = True
+
+    def reschedule_daily(self, run_hour: int) -> None:
+        self.rescheduled.append(run_hour)
 
     @property
     def next_run_at(self) -> datetime | None:
@@ -535,6 +539,27 @@ def test_config_put_valid_saves_and_preserves_fx_rates(client: TestClient, db_pa
     assert cfg["schedule"]["run_hour_local"] == 5
     assert cfg["salary"]["min_remote"] == 40000
     assert cfg["salary"]["fx_rates"] == {"USD": 83.0, "EUR": 90.0, "GBP": 105.0}  # preserved
+
+
+def test_config_put_reschedules_only_on_run_hour_change(
+    db_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sched = FakeScheduler(db_path)
+    app = create_app(db_path=db_path, clock=FixedClock(FIXED_NOW), scheduler=sched)
+    with TestClient(app) as c:
+        # seed default run_hour is 3; changing it pushes the new hour to the live scheduler
+        assert c.put("/api/config", data={"run_hour_local": "7"}).status_code == 200
+        assert sched.rescheduled == [7]
+        # a save that doesn't touch run_hour does NOT reschedule
+        c.put("/api/config", data={"salary_min_remote": "50000"})
+        assert sched.rescheduled == [7]  # unchanged
+
+
+def test_remotive_not_a_source_toggle(client: TestClient) -> None:
+    # remotive has no Source impl -> it must not appear as a live toggle in the config form
+    r = client.get("/config")
+    assert 'name="src_jobspy"' in r.text
+    assert 'name="src_remotive"' not in r.text
 
 
 def test_config_put_persists_must_have(client: TestClient, db_path: str) -> None:
@@ -1028,3 +1053,22 @@ def test_adzuna_shows_preview_note(client: TestClient, db_path: str) -> None:
     conn.close()
     r = client.get("/api/jobs/adz/detail")
     assert "only returns a short preview" in r.text  # the data-limitation hint
+
+
+def test_config_put_persists_source_search_terms(client: TestClient, db_path: str) -> None:
+    # jobspy/unstop search terms are now editable from the dashboard (were YAML/DB-only).
+    r = client.put(
+        "/api/config",
+        data={
+            "jobspy_search_terms": "backend intern\nml intern",
+            "unstop_search_terms": "backend\nsoftware",
+        },
+    )
+    assert r.status_code == 200
+    conn = connect(db_path)
+    cfg = __import__("json").loads(
+        conn.execute("SELECT data FROM config WHERE id=1").fetchone()["data"]
+    )
+    conn.close()
+    assert cfg["sources"]["jobspy"]["search_terms"] == ["backend intern", "ml intern"]
+    assert cfg["sources"]["unstop"]["search_terms"] == ["backend", "software"]

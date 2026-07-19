@@ -31,7 +31,9 @@ from job_aggregator.profile.store import load_profile_text, save_profile_text
 
 router = APIRouter()
 
-# Sources whose enabled flag the form exposes (top-level toggles).
+# Sources whose enabled flag the form exposes (top-level toggles). `remotive` is intentionally
+# absent: it's a documented dead-end with no Source implementation, so a toggle for it would do
+# nothing (the config field stays for the record, but the UI must not imply it works).
 _SOURCE_TOGGLES = (
     "jobspy",
     "unstop",
@@ -41,7 +43,6 @@ _SOURCE_TOGGLES = (
     "jobicy",
     "adzuna",
     "jooble",
-    "remotive",
 )
 
 
@@ -78,6 +79,10 @@ class ConfigForm(BaseModel):
     notify_rss_enabled: bool | None = None
     notify_email_to: str | None = None
 
+    # per-source search terms (internship targeting)
+    jobspy_search_terms: str | None = None
+    unstop_search_terms: str | None = None
+
     # source toggles carried as a JSON-ish dict is overkill; each is an explicit field below.
     src_jobspy: bool | None = None
     src_unstop: bool | None = None
@@ -95,6 +100,8 @@ class ConfigForm(BaseModel):
     apply_use_browser_cookies: bool | None = None
     resume_backend: str | None = None  # "coding_agent" (Claude Code, no key) | "openai_compatible"
     resume_tailor_with_llm: bool | None = None  # rewrite bullets with the LLM vs deterministic
+    resume_base_url: str | None = None  # openai_compatible endpoint
+    resume_model: str | None = None
 
 
 def _split(value: str) -> list[str]:
@@ -136,6 +143,12 @@ def _apply_keywords(merged: dict[str, Any], f: ConfigForm) -> None:
 
 def _apply_notify_sources(merged: dict[str, Any], f: ConfigForm) -> None:
     notify, sources = merged["notify"], merged["sources"]
+    # Per-source search terms (the internship-targeting knobs): jobspy's per-site scrape terms and
+    # unstop's API searchTerm list — previously only editable via YAML/DB.
+    if f.jobspy_search_terms is not None:
+        sources["jobspy"]["search_terms"] = _split(f.jobspy_search_terms)
+    if f.unstop_search_terms is not None:
+        sources["unstop"]["search_terms"] = _split(f.unstop_search_terms)
     _overlay(notify["telegram"], ((f.notify_telegram_enabled, "enabled"),))
     _overlay(notify["email"], ((f.notify_email_enabled, "enabled"), (f.notify_email_to, "to")))
     _overlay(notify["rss"], ((f.notify_rss_enabled, "enabled"),))
@@ -182,6 +195,8 @@ def _apply_form(current: dict[str, Any], f: ConfigForm) -> dict[str, Any]:
         (
             (f.resume_backend, "backend"),
             (f.resume_tailor_with_llm, "tailor_with_llm"),
+            (f.resume_base_url, "base_url"),
+            (f.resume_model, "model"),
         ),
     )
     return merged
@@ -211,8 +226,10 @@ def config_page(
 def put_config(
     form: Annotated[ConfigForm, Form()],
     conn: sqlite3.Connection = Depends(get_conn),
+    scheduler: SchedulerProtocol = Depends(get_scheduler),
 ) -> dict[str, Any]:
     current = load_effective_config(conn).model_dump(mode="json")
+    prev_run_hour = current["schedule"]["run_hour_local"]
     merged = _apply_form(current, form)
     try:
         cfg = Config.model_validate(merged)
@@ -222,6 +239,10 @@ def put_config(
         }
         raise ConfigError("config is invalid", details=details) from exc
     save_config(conn, cfg)
+    # run_hour is the one config knob the running scheduler already committed to (its cron was
+    # registered at boot). Push the change through NOW so it doesn't silently wait for a restart.
+    if cfg.schedule.run_hour_local != prev_run_hour:
+        scheduler.reschedule_daily(cfg.schedule.run_hour_local)
     return {"ok": True, "message": "Saved. Applies on the next run."}
 
 

@@ -114,6 +114,17 @@ class JobScheduler:
             self._scheduler.shutdown(wait=False)
             log.info("scheduler stopped")
 
+    def reschedule_daily(self, run_hour: int) -> None:
+        """Move the daily cron to a new hour NOW (so a dashboard change to run_hour_local takes
+        effect without a restart). No-op if the scheduler isn't running. The next-run cycle still
+        reads the fresh config, so only the FIRING TIME needs updating here."""
+        if self._scheduler is None or not self._scheduler.running:
+            return
+        from apscheduler.triggers.cron import CronTrigger
+
+        self._scheduler.reschedule_job(DAILY_JOB_ID, trigger=CronTrigger(hour=run_hour))
+        log.info("daily run rescheduled to %02d:00 local", run_hour)
+
     @property
     def next_run_at(self) -> datetime | None:
         if self._scheduler is None:

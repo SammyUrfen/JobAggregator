@@ -23,10 +23,10 @@ class Keywords(BaseModel):
     level_required: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=list)
     require_level: bool = True
-    # intern_queries: extra internship-targeted query phrases sent to the query-driven sources
-    # (Adzuna `what`, Jooble keywords) IN ADDITION to the role phrases. Role phrases alone
-    # ("backend engineer") structurally return mid/senior postings — verified live: 0 of 148
-    # Jooble and 7 of 434 Adzuna results were internships until these were added.
+    # intern_queries: internship-targeted query phrases ridden on JOOBLE (as extra keyword
+    # queries) in addition to the role phrases — Jooble's internship share is ~2%, so these help.
+    # Adzuna does NOT read this: it has its own dedicated title_only=intern walk (see adzuna.py),
+    # which is a stronger internship lever than a `what` phrase.
     intern_queries: list[str] = Field(default_factory=list)
     # max_experience_years: drop a (non-internship) job whose DESCRIPTION demands more than this
     # many years of experience (title-only excludes miss "5+ years" buried in the JD — 52% of
