@@ -166,7 +166,8 @@
   async function postTailor(uid, btn) {
     const container = document.querySelector(".jd-tailor" + uidSel(uid));
     if (btn) { btn.disabled = true; btn.textContent = "Tailoring…"; }
-    if (container) container.innerHTML = '<p class="muted">Tailoring…</p>';
+    if (container) container.innerHTML =
+      '<p class="muted">Tailoring with the LLM — this can take ~30–60s with Claude Code…</p>';
     try {
       const res = await fetch("/api/jobs/" + encodeURIComponent(uid) + "/tailor", {
         method: "POST",

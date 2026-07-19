@@ -4,6 +4,8 @@
 <div class="tailor-result">
   <div class="tailor-head">
     <strong>Tailored résumé</strong>
+    <span class="badge {{ 'intern' if tailored.used_llm else 'source' }} mono">
+      {{ 'LLM-reworded' if tailored.used_llm else 'deterministic' }}</span>
     <span class="badge mono">preservation {{ '%.0f'|format(tailored.preservation * 100) }}%</span>
     <span class="badge mono">{{ tailored.jd_keywords|length }} keywords</span>
   </div>

@@ -94,6 +94,7 @@ class ConfigForm(BaseModel):
     apply_engine: str | None = None  # "agentic" (Claude drives the browser) | "deterministic"
     apply_use_browser_cookies: bool | None = None
     resume_backend: str | None = None  # "coding_agent" (Claude Code, no key) | "openai_compatible"
+    resume_tailor_with_llm: bool | None = None  # rewrite bullets with the LLM vs deterministic
 
 
 def _split(value: str) -> list[str]:
@@ -176,7 +177,13 @@ def _apply_form(current: dict[str, Any], f: ConfigForm) -> dict[str, Any]:
             (f.apply_use_browser_cookies, "use_browser_cookies"),
         ),
     )
-    _overlay(merged["resume"], ((f.resume_backend, "backend"),))
+    _overlay(
+        merged["resume"],
+        (
+            (f.resume_backend, "backend"),
+            (f.resume_tailor_with_llm, "tailor_with_llm"),
+        ),
+    )
     return merged
 
 

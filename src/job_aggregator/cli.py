@@ -120,11 +120,13 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     profile = load_profile()  # ConfigError (friendly) if profile.yaml is missing
     # Title + description so even a null description still yields keywords from the title.
     jd = f"{row['title']}\n{row['description'] or ''}"
+    # Rewrite bullets with the LLM when the config asks (default: Claude Code) or --llm forces it;
+    # a missing CLI/key degrades to deterministic selection (try_build_backend returns None).
     backend = None
-    if args.llm:  # opt-in; imports httpx only on this path (keeps `import cli` stdlib-only)
-        from job_aggregator.apply.backends import build_backend
+    if cfg.resume.tailor_with_llm or args.llm:
+        from job_aggregator.apply.backends import try_build_backend
 
-        backend = build_backend(cfg.resume)
+        backend = try_build_backend(cfg.resume)
     tailored = tailor_resume(profile, jd, backend=backend, config=cfg.resume)
     print(f"projects: {', '.join(p.name for p in tailored.projects)}")
     print(
@@ -152,7 +154,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     from job_aggregator.apply.agent import apply_to_job
     from job_aggregator.apply.driver import BrowserDriver, PlaywrightDriver
     from job_aggregator.config.store import load_effective_config
-    from job_aggregator.errors import ConfigError, NotFoundError
+    from job_aggregator.errors import NotFoundError
     from job_aggregator.logging_setup import configure_logging
     from job_aggregator.models.job import Job
     from job_aggregator.paths import data_dir
@@ -166,15 +168,15 @@ def cmd_apply(args: argparse.Namespace) -> int:
         raise NotFoundError("job not found", details={"uid": args.uid})
     cfg = load_effective_config(conn)
     profile = load_profile()
-    # The deterministic driver wants an LLM for Set-of-Marks grounding. If no key is configured,
-    # build_backend raises ConfigError and the driver degrades to deterministic/generic fills.
-    ground_backend = None
-    try:
-        from job_aggregator.apply.backends import build_backend
+    # One LLM backend, used for BOTH résumé tailoring (folds into the tailor_resume call below)
+    # and, on the deterministic driver, Set-of-Marks grounding. Config-driven (Claude Code by
+    # default); a missing CLI/key -> None -> deterministic selection + generic fills. --llm forces
+    # it on even if resume.tailor_with_llm is off.
+    from job_aggregator.apply.backends import try_build_backend
 
-        ground_backend = build_backend(cfg.resume)
-    except ConfigError:
-        pass
+    llm_backend = (
+        try_build_backend(cfg.resume) if (cfg.resume.tailor_with_llm or args.llm) else None
+    )
 
     # Engine choice: "agentic" = a Claude session drives the visible browser via the playwright
     # MCP (reaches the form from a posting page, waits with you through captcha/login walls).
@@ -203,7 +205,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 f"agentic engine unavailable ({claude_bin!r} or npx not on PATH); "
                 "using the deterministic selector fill"
             )
-        driver = PlaywrightDriver(backend=ground_backend)
+        driver = PlaywrightDriver(backend=llm_backend)
     job = Job.model_validate(
         {
             "job_uid": row["job_uid"],
@@ -225,7 +227,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         profile,
         cfg,
         driver=driver,
-        backend=(ground_backend if args.llm else None),
+        backend=llm_backend,
         extra_context=extra_context,
     )
     # Mark applied only NOW — the fill completed and the human reviewed it in the browser.

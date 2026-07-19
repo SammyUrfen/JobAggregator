@@ -285,9 +285,13 @@ resume:
   base_url: https://api.openai.com/v1
   model: gpt-4o-mini
   api_key_env: OPENAI_API_KEY
-  agent_command: [claude, -p]   # used only when backend = coding_agent
+  agent_command: [claude, -p, --model, sonnet]   # backend=coding_agent; sonnet (default opus-1M
+                                                  # is ~4x slower for no résumé-quality gain)
   max_projects: 4               # projects to include on the tailored résumé
   temperature: 0.2              # low = truthful/deterministic
+  tailor_with_llm: true         # true = the backend above rewords bullets (Claude Code by
+                                # default, behind the anti-fabrication guard); false = pure
+                                # deterministic selection. A missing CLI/key degrades to false.
 
 apply:
   enabled: false                # the browser apply agent (Track D) is opt-in; OFF by default

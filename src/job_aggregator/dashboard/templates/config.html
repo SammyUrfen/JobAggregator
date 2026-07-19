@@ -137,6 +137,8 @@
     </div>
     <label class="chk"><input type="checkbox" name="apply_use_browser_cookies" value="true"
       {% if config.apply.use_browser_cookies %}checked{% endif %}> use_browser_cookies (start logged in via your Zen/Firefox session for the posting's site)</label>
+    <label class="chk"><input type="checkbox" name="resume_tailor_with_llm" value="true"
+      {% if config.resume.tailor_with_llm %}checked{% endif %}> tailor_with_llm (the backend below rewords résumé bullets; off = deterministic selection only)</label>
     <div class="field">
       <label for="resume_backend">LLM backend (résumé tailoring + form-fill)</label>
       <select id="resume_backend" name="resume_backend">
@@ -146,9 +148,12 @@
           {% if config.resume.backend == 'openai_compatible' %}selected{% endif %}>openai_compatible — HTTP endpoint (needs a key in .env)</option>
       </select>
     </div>
-    <p class="muted">Never auto-submits — you review + submit. Runs locally + headful: install
-      <code>pip install -e '.[apply]'</code> and set <code>JOBAGG_SESSION_KEY</code> in <code>.env</code>.
-      With Claude Code (coding_agent) no API key is needed.</p>
+    <p class="muted">Résumé tailoring uses this backend (Claude Code by default — no API key) to
+      reword bullets behind an anti-fabrication guard; a missing CLI/key degrades to deterministic
+      selection. For <code>openai_compatible</code> set <code>base_url</code>/<code>model</code> in
+      <code>config/default_config.yaml</code> and the key in <code>.env</code>. Never auto-submits —
+      you review + submit. Apply runs locally + headful: install <code>pip install -e '.[apply]'</code>
+      and set <code>JOBAGG_SESSION_KEY</code> in <code>.env</code>.</p>
   </fieldset>
 
   <button class="btn" type="submit">Save config</button>

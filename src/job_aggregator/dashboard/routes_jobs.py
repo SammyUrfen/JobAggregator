@@ -426,10 +426,16 @@ _JOB_UID_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _tailor_backend(cfg: Config) -> AgentBackend | None:
-    """Seam: the résumé backend for on-click tailoring. Default None = pure deterministic selection
-    (no network, no key, no fabrication risk — the fill→review invariant stays intact). Tests
-    monkeypatch this to inject a fake; a future 'use LLM' toggle would return build_backend here."""
-    return None
+    """The résumé backend for on-click tailoring: the configured LLM (Claude Code by default) so
+    the Tailor button actually rewords bullets, or None (pure deterministic selection) when
+    `resume.tailor_with_llm` is off OR the backend can't run (missing CLI / API key — degrades to
+    deterministic, never a 500). The anti-fabrication guard protects the LLM path either way.
+    Tests monkeypatch this to inject a fake."""
+    from job_aggregator.apply.backends import try_build_backend
+
+    if not cfg.resume.tailor_with_llm:
+        return None
+    return try_build_backend(cfg.resume)
 
 
 def _effective_context(conn: sqlite3.Connection, uid: str, sent: str | None) -> str:

@@ -93,6 +93,7 @@ def test_tailor_without_backend_preserves_everything() -> None:
     assert res.preservation == 1.0
     assert res.flags == []
     assert res.projects[0].bullets == _DB.bullets  # untouched
+    assert res.used_llm is False  # deterministic selection, no LLM
 
 
 # ── tailoring: merge-exclusion guard ──────────────────────────────────────────────────────
@@ -160,3 +161,76 @@ def test_compile_pdf_without_engine_raises(monkeypatch: pytest.MonkeyPatch, tmp_
         render.compile_pdf(
             r"\documentclass{article}\begin{document}x\end{document}", tmp_path / "x.pdf"
         )
+
+
+# ── batched multi-project rewrite (one backend call) ─────────────────────────────────────
+
+
+def test_batched_rewrite_attributes_projects_by_header() -> None:
+    # ONE backend call rewrites both projects; the ### <name> headers map bullets back.
+    response = (
+        "### WALterDB\n"
+        "Engineered a C++20 database engine — 7K LOC, 91 tests.\n"
+        "### Portfolio\n"
+        "Shipped a personal website spanning 3 pages.\n"
+    )
+    fake = FakeBackend(response)
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database web", backend=fake, config=ResumeConfig(max_projects=2)
+    )
+    assert fake.calls == 1  # batched: one subprocess/HTTP call for all projects
+    by_name = {p.name: p.bullets for p in res.projects}
+    assert by_name["WALterDB"] == ["Engineered a C++20 database engine — 7K LOC, 91 tests."]
+    assert by_name["Portfolio"] == ["Shipped a personal website spanning 3 pages."]
+    assert res.used_llm is True
+
+
+def test_batched_rewrite_unattributable_falls_back() -> None:
+    # A reply with no project headers (and >1 project) can't be attributed -> keep all originals.
+    fake = FakeBackend("just prose, no headers at all")
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database web", backend=fake, config=ResumeConfig(max_projects=2)
+    )
+    by_name = {p.name: p.bullets for p in res.projects}
+    assert by_name["WALterDB"] == _DB.bullets
+    assert by_name["Portfolio"] == _WEB.bullets
+    assert res.used_llm is False
+    assert any("could not be attributed" in f for f in res.flags)
+
+
+def test_batched_rewrite_missing_project_keeps_that_original() -> None:
+    # The model rewrote only WALterDB; Portfolio (omitted) keeps its original bullets.
+    fake = FakeBackend("### WALterDB\nBuilt a C++20 database engine — 7K LOC, 91 tests.\n")
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database web", backend=fake, config=ResumeConfig(max_projects=2)
+    )
+    by_name = {p.name: p.bullets for p in res.projects}
+    assert by_name["Portfolio"] == _WEB.bullets  # untouched
+    assert res.used_llm is True  # WALterDB was reworded
+
+
+# ── try_build_backend degradation ─────────────────────────────────────────────────────────
+
+
+def test_try_build_backend_coding_agent_missing_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_aggregator.apply import backends
+    from job_aggregator.config.schema import ResumeConfig
+
+    monkeypatch.setattr(backends.shutil, "which", lambda _exe: None)  # `claude` not on PATH
+    assert backends.try_build_backend(ResumeConfig(backend="coding_agent")) is None
+
+
+def test_try_build_backend_coding_agent_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_aggregator.apply import backends
+    from job_aggregator.config.schema import ResumeConfig
+
+    monkeypatch.setattr(backends.shutil, "which", lambda _exe: "/usr/bin/claude")
+    assert backends.try_build_backend(ResumeConfig(backend="coding_agent")) is not None
+
+
+def test_try_build_backend_openai_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_aggregator.apply import backends
+    from job_aggregator.config.schema import ResumeConfig
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert backends.try_build_backend(ResumeConfig(backend="openai_compatible")) is None

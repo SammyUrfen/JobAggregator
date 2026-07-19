@@ -450,6 +450,7 @@ def test_tailor_route_returns_preview(
     example = load_profile(PROFILE_EXAMPLE_YAML)  # the committed placeholder validates
     monkeypatch.setattr(routes_jobs, "load_profile", lambda: example)
     monkeypatch.setattr(routes_jobs, "compile_pdf", lambda tex, out: out)  # skip real LaTeX
+    monkeypatch.setattr(routes_jobs, "_tailor_backend", lambda cfg: None)  # deterministic, no LLM
     monkeypatch.setenv("JOBAGG_DATA_DIR", str(tmp_path))
     r = client.post("/api/jobs/j1/tailor")
     assert r.status_code == 200
@@ -457,11 +458,24 @@ def test_tailor_route_returns_preview(
     assert "/api/jobs/j1/resume.pdf" in r.text  # PDF link present when compile succeeds
 
 
-def test_tailor_route_backend_seam_is_none_by_default() -> None:
+def test_tailor_backend_seam_is_config_driven(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_aggregator.apply import backends
     from job_aggregator.config.schema import Config
     from job_aggregator.dashboard.routes_jobs import _tailor_backend
 
-    # default seam = no LLM backend -> pure deterministic selection, no network, no fabrication
+    # tailor_with_llm off -> deterministic (None), regardless of CLI availability
+    off = Config()
+    off.resume.tailor_with_llm = False
+    assert _tailor_backend(off) is None
+
+    # on + coding-agent CLI present -> a real backend (Claude Code by default)
+    monkeypatch.setattr(backends.shutil, "which", lambda _exe: "/usr/bin/claude")
+    on = Config()
+    assert on.resume.tailor_with_llm is True  # default is now on
+    assert _tailor_backend(on) is not None
+
+    # on but the CLI is missing -> degrades to deterministic (None), never a crash
+    monkeypatch.setattr(backends.shutil, "which", lambda _exe: None)
     assert _tailor_backend(Config()) is None
 
 
@@ -663,7 +677,14 @@ def test_apply_route_unknown_uid_404(client: TestClient) -> None:
 
 
 def test_config_put_persists_apply_and_backend(client: TestClient, db_path: str) -> None:
-    r = client.put("/api/config", data={"apply_enabled": "true", "resume_backend": "coding_agent"})
+    r = client.put(
+        "/api/config",
+        data={
+            "apply_enabled": "true",
+            "resume_backend": "openai_compatible",
+            "resume_tailor_with_llm": "false",
+        },
+    )
     assert r.status_code == 200
     conn = connect(db_path)
     cfg = __import__("json").loads(
@@ -671,7 +692,8 @@ def test_config_put_persists_apply_and_backend(client: TestClient, db_path: str)
     )
     conn.close()
     assert cfg["apply"]["enabled"] is True
-    assert cfg["resume"]["backend"] == "coding_agent"
+    assert cfg["resume"]["backend"] == "openai_compatible"  # switch to the OpenAI endpoint
+    assert cfg["resume"]["tailor_with_llm"] is False  # the LLM-rewrite toggle round-trips
 
 
 def test_config_put_can_disable_toggles(client: TestClient, db_path: str) -> None:

@@ -76,4 +76,7 @@ def test_build_backend_openai_requires_key(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_build_backend_openai_with_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
-    assert isinstance(build_backend(ResumeConfig()), OpenAICompatibleBackend)
+    # default backend is now coding_agent — request the OpenAI one explicitly
+    assert isinstance(
+        build_backend(ResumeConfig(backend="openai_compatible")), OpenAICompatibleBackend
+    )

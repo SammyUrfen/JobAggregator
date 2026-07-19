@@ -215,14 +215,21 @@ class ResumeConfig(BaseModel):
     env var named by `api_key_env`. Two backends: an OpenAI-compatible HTTP endpoint, or a local
     coding agent (Claude Code / Codex) invoked as a subprocess."""
 
-    backend: Literal["openai_compatible", "coding_agent"] = "openai_compatible"
+    backend: Literal["openai_compatible", "coding_agent"] = "coding_agent"
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o-mini"
     api_key_env: str = "OPENAI_API_KEY"  # which env var holds the key (never the key itself)
-    # coding-agent backend: a command that reads a prompt on stdin, writes the completion to stdout.
-    agent_command: list[str] = Field(default_factory=lambda: ["claude", "-p"])
+    # coding-agent backend: a command that reads a prompt on stdin, writes the completion to
+    # stdout. `--model sonnet` because the default (inherited) model is a slow opus-1M — a
+    # résumé rewrite doesn't need it, and sonnet turns a ~60s call into ~15s. Edit to taste.
+    agent_command: list[str] = Field(default_factory=lambda: ["claude", "-p", "--model", "sonnet"])
     max_projects: int = Field(default=4, ge=1)  # projects to include on the tailored résumé
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)  # low = truthful, deterministic
+    # Rewrite résumé bullets with the LLM (the `backend` above) when tailoring. True = Claude Code
+    # (or the OpenAI endpoint) rewords bullets behind the anti-fabrication guard; False = pure
+    # deterministic selection (project ranking + skill reorder, bullets kept verbatim). A missing
+    # CLI/key degrades to deterministic regardless.
+    tailor_with_llm: bool = True
 
 
 class ApplyConfig(BaseModel):

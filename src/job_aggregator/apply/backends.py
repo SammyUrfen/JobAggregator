@@ -15,6 +15,7 @@ facts rather than crashing a flow).
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from typing import TYPE_CHECKING, Protocol
 
@@ -111,3 +112,18 @@ def build_backend(cfg: ResumeConfig) -> AgentBackend:
             details={"env": cfg.api_key_env},
         )
     return OpenAICompatibleBackend(cfg.base_url, cfg.model, key)
+
+
+def try_build_backend(cfg: ResumeConfig) -> AgentBackend | None:
+    """build_backend, but returns None instead of a broken/raising backend when it can't actually
+    run — a missing OpenAI key, or a coding-agent CLI (`claude`) not on PATH. Callers use this so
+    a missing tool degrades to deterministic tailoring rather than crashing the flow."""
+    try:
+        backend = build_backend(cfg)
+    except ConfigError:
+        return None
+    if cfg.backend == "coding_agent":
+        exe = (cfg.agent_command or ["claude"])[0]
+        if not shutil.which(exe):
+            return None
+    return backend
