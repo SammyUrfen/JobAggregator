@@ -199,6 +199,23 @@ employers/numbers/tech), never leave blank — the human reviews before submit. 
 leaves genuinely-unknown FACTUAL fields blank (dates, exact years, demographics). extra_context
 is highest-priority for answers.
 
+**'seen' flag + description enrichment (`67c7ee1`, 516 passed, schema v4):**
+- **Descriptions diagnosed:** Adzuna returns a 500-char preview, Jooble a ~300-char snippet
+  (DATA, not UI — the 12000-char modal cap truncates nothing); modal now shows a "short preview"
+  note (`_PREVIEW_DESC_SOURCES`). Internshala listings only stored the category slug — the real
+  JD is on the detail page, NOT crawled in the run (robots ambiguous re bulk detail). Fix:
+  `internshala.fetch_detail_description(url)` (parses `.internship_details`) is called ON DEMAND
+  from `job_detail` via `effective_description(conn,row)` when the user opens an Internshala job
+  (human-triggered, one page), cached to `full_description` (new column, survives upsert like a
+  user field) so re-opens are instant; tailoring/apply prefer full_description
+  (`_row_description`, cli reads it too). Live-verified: first open fetched + cached 12000 chars.
+- **'seen' user flag** ("read it, decided to wait / not apply"): schema v4 `seen` column,
+  `_USER_FLAG_FIELDS`/`_BOOL_FLAG_FIELDS` += seen, `_ACTIONS` seen/unseen + JobAction literal,
+  Seen button in the shared `quick_actions` macro (reuses the existing row-action JS — no new
+  JS), a "seen" badge + dimmed card (`.job-card.seen`, un-dims on hover), a **Hide seen** filter
+  chip (`?hide_seen=1` → `seen=0`). Survives re-fetch. Both v4 columns migrated on the live DB
+  (backup `data/backups/jobs.pre-v4-*.db`).
+
 **Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
 by the user (it now reaches + drafts the whole form incl. screening Qs; a real headful run is
 still the pending check); LinkedIn Easy Apply remains best-effort (anti-bot); résumé tailoring
