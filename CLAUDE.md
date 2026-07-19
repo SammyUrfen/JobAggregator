@@ -216,12 +216,33 @@ is highest-priority for answers.
   chip (`?hide_seen=1` → `seen=0`). Survives re-fetch. Both v4 columns migrated on the live DB
   (backup `data/backups/jobs.pre-v4-*.db`).
 
+**Sleep/wake catch-up + audit fixes (2026-07-19 evening, 531 passed):**
+- **Sleep/wake bug (`470773a`):** catch-up ran only at process START; a laptop asleep THROUGH
+  run_hour and woken past the cron's 1h misfire grace skipped the day with no catch-up until a
+  restart. Added a **periodic catch-up poll** (`CATCHUP_POLL_MINUTES=30`, IntervalTrigger,
+  misfire_grace=None so the first tick after wake fires) sharing `_is_catch_up_due`; the run-lock
+  makes it un-double-fetchable. Live-verified the poll registers.
+- **SSRF hardening (`32acddc`):** the on-demand Internshala fetch guarded by a weak substring
+  check → now `_is_internshala_detail_url` parses the HOST (rejects file://, metadata IPs,
+  look-alike domains).
+- **Deep audit (4-agent workflow was flaky — StructuredOutput stubs — so I recovered findings
+  from transcripts + verified each directly). Fixed (`f0a758f`):** run_hour change now
+  **reschedules the live cron** without a restart (`scheduler.reschedule_daily` + put_config calls
+  it; SchedulerProtocol gained the method) — live-verified next_run moved 03:00→06:00; dropped the
+  DEAD `remotive` UI toggle (no Source impl); wired `rss.path` (was ignored — RssNotifier now gets
+  out_path); exposed **jobspy/unstop search_terms + openai base_url/model** in the config UI (were
+  YAML/DB-only); corrected the `intern_queries` docs (feeds Jooble only — Adzuna has its own
+  title_only=intern walk). `salary.period` is a harmless unused reference value (left as-is).
+- **`a1175c8`:** apply mcp-config temp file cleaned up via try/finally even on the error path.
+  Verified: cookie VALUES are never logged (counts only).
+
 **Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
 by the user (it now reaches + drafts the whole form incl. screening Qs; a real headful run is
 still the pending check); LinkedIn Easy Apply remains best-effort (anti-bot); résumé tailoring
 blocks ~60s on the LLM (one call reading the whole portfolio, honest UI note); the
-anti-fabrication guard is numeric-only (drafted prose answers rely on review); dashboard auth /
-cross-process run-lock / fuzzy-dedup remain documented limitations.
+anti-fabrication guard is numeric-only (drafted prose answers rely on review); the claude
+subprocess inherits the parent env (secrets from .env) — trusted local CLI, low risk, unscoped;
+dashboard auth / cross-process run-lock / fuzzy-dedup remain documented limitations.
 
 **Auto-apply extension (post-v1) — in progress.** Design + verified research in
 `docs/auto_apply_design.md`. Locked decisions: fill→**you review→you submit** (never blind
