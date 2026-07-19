@@ -200,8 +200,9 @@ def client(db_path: str) -> Iterator[TestClient]:
 
 def _uid_order(html: str) -> list[str]:
     # One match per card (the <article> carries data-uid; its inner action buttons do too, so we
-    # anchor on the card element to keep exactly one hit per job, in render order).
-    return re.findall(r'<article class="job-card" data-uid="(j\d+)"', html)
+    # anchor on the card element to keep exactly one hit per job, in render order). The class may
+    # carry a `seen` modifier and data-uid may sit on the next line, so tolerate both.
+    return re.findall(r'<article class="job-card[^"]*"\s+data-uid="(j\d+)"', html)
 
 
 # ── index + filters ─────────────────────────────────────────────────────────────────────
@@ -893,3 +894,137 @@ def test_tailor_folds_sent_context_into_jd(
         == "SECRET-CONTEXT-XYZ"
     )  # and was persisted
     conn.close()
+
+
+# ── seen flag + hide-seen filter + description enrichment ────────────────────────────────
+
+
+def test_seen_action_toggles_and_swaps_card(client: TestClient, db_path: str) -> None:
+    r = client.post("/api/jobs/j2/action", json={"action": "seen"})
+    assert r.status_code == 200
+    assert 'data-action="unseen"' in r.text  # the card now offers to un-see it
+    assert "✓ Seen" in r.text
+    conn = connect(db_path)
+    assert conn.execute("SELECT seen FROM jobs WHERE job_uid='j2'").fetchone()[0] == 1
+    conn.close()
+    r2 = client.post("/api/jobs/j2/action", json={"action": "unseen"})
+    assert 'data-action="seen"' in r2.text
+
+
+def test_hide_seen_filter_excludes_seen_rows(client: TestClient, db_path: str) -> None:
+    conn = connect(db_path)
+    conn.execute("UPDATE jobs SET seen = 1 WHERE job_uid = 'j2'")
+    conn.commit()
+    conn.close()
+    visible = set(_uid_order(client.get("/?hide_seen=1").text))
+    assert "j2" not in visible  # seen row hidden
+    assert "j1" in visible  # un-seen row stays
+    assert "j2" in set(_uid_order(client.get("/").text))  # default view still shows it
+
+
+def test_seen_flag_survives_reingest(db_path: str, clock: object = None) -> None:
+    # seen is a user field — a re-fetch upsert must not clear it (mirrors applied/bookmarked).
+    from datetime import UTC, datetime
+
+    from job_aggregator.clock import FixedClock
+    from job_aggregator.models.job import Job
+    from job_aggregator.storage import jobs_repo, runs_repo
+
+    conn = connect(db_path)
+    clk = FixedClock(datetime(2026, 7, 19, tzinfo=UTC))
+    rid = runs_repo.start_run(conn, "manual", clk)
+    conn.commit()
+    job = Job(job_uid="seentest", source="unstop", title="Backend Intern", company="X", url="u")
+    jobs_repo.upsert_job(conn, job, rid, clk)
+    jobs_repo.set_user_flag(conn, "seentest", "seen", True)
+    rid2 = runs_repo.start_run(conn, "manual", clk)
+    conn.commit()
+    jobs_repo.upsert_job(conn, job, rid2, clk)  # re-fetch
+    assert conn.execute("SELECT seen FROM jobs WHERE job_uid='seentest'").fetchone()[0] == 1
+    conn.close()
+
+
+def test_internshala_detail_enriches_and_caches(
+    client: TestClient, db_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn = connect(db_path)
+    conn.execute(
+        _JOB_SQL,
+        (
+            "ish",
+            "internshala",
+            "Backend Development Internship",
+            "Acme",
+            None,
+            1,
+            "https://internshala.com/internship/detail/x-123",
+            None,
+            None,
+            None,
+            None,
+            0,
+            "unknown",
+            9.0,
+            "2026-07-18",
+            _NOW,
+            _NOW,
+            1,
+            "active",
+            0,
+            0,
+            0,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    calls: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        calls.append(url)
+        return "<p>Real JD: build backend APIs with Django.</p>"
+
+    monkeypatch.setattr("job_aggregator.sources.internshala.fetch_detail_description", fake_fetch)
+    r = client.get("/api/jobs/ish/detail")
+    assert r.status_code == 200
+    assert "Real JD: build backend APIs with Django." in r.text  # enriched
+    assert len(calls) == 1
+    # cached: a second open does NOT refetch
+    r2 = client.get("/api/jobs/ish/detail")
+    assert "Real JD: build backend APIs" in r2.text
+    assert len(calls) == 1  # no second fetch — served from full_description
+
+
+def test_adzuna_shows_preview_note(client: TestClient, db_path: str) -> None:
+    conn = connect(db_path)
+    conn.execute(
+        _JOB_SQL,
+        (
+            "adz",
+            "adzuna",
+            "Backend Engineer",
+            "Acme",
+            "Remote",
+            1,
+            "https://adzuna/x",
+            None,
+            None,
+            None,
+            None,
+            0,
+            "unknown",
+            5.0,
+            "2026-07-18",
+            _NOW,
+            _NOW,
+            1,
+            "active",
+            0,
+            0,
+            0,
+        ),
+    )
+    conn.execute("UPDATE jobs SET description='A truncated preview…' WHERE job_uid='adz'")
+    conn.commit()
+    conn.close()
+    r = client.get("/api/jobs/adz/detail")
+    assert "only returns a short preview" in r.text  # the data-limitation hint

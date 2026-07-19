@@ -39,6 +39,10 @@
   <div class="jd-desc">
     {% if description_html %}
       <div class="jd-desc-body">{{ description_html|safe }}</div>
+      {% if description_is_preview %}
+        <p class="muted jd-desc-note">This source ({{ job.source }}) only returns a short preview —
+          open the original posting for the full description.</p>
+      {% endif %}
     {% else %}
       <p class="muted">No description provided by the source — open the original posting for details.</p>
     {% endif %}

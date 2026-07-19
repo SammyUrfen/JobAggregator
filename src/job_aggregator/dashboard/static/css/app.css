@@ -155,6 +155,11 @@ a:hover { text-decoration: underline; }
 .badge.source { background: var(--surface-2); color: var(--text-secondary); }
 .badge.applied { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
 .badge.bookmarked { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.badge.seen { background: var(--surface-2); color: var(--text-secondary); }
+/* seen-but-not-applied cards dim so un-reviewed jobs stand out (they still open/act normally). */
+.job-card.seen { opacity: 0.6; }
+.job-card.seen:hover, .job-card.seen:focus-within { opacity: 1; }
+.jd-desc-note { font-size: 11px; margin-top: var(--sp-2); }
 .badge.status { background: var(--surface-2); color: var(--text-secondary); }
 .badge.status-new { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
 .badge.status-stale, .badge.status-deleted { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }

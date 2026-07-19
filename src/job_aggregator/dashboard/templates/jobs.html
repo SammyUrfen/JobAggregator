@@ -26,6 +26,7 @@
     <option value="salary" {% if query.sort == 'salary' %}selected{% endif %}>Sort: salary</option>
   </select>
   <label class="chk"><input type="checkbox" name="intern" value="1" {% if query.intern %}checked{% endif %}> Internships</label>
+  <label class="chk"><input type="checkbox" name="hide_seen" value="1" {% if query.hide_seen %}checked{% endif %}> Hide seen</label>
   <label class="chk"><input type="checkbox" name="applied" value="1" {% if query.applied %}checked{% endif %}> Applied</label>
   <label class="chk"><input type="checkbox" name="bookmarked" value="1" {% if query.bookmarked %}checked{% endif %}> Bookmarked</label>
   <label class="chk"><input type="checkbox" name="show_hidden" value="1" {% if query.show_hidden %}checked{% endif %}> Show hidden</label>

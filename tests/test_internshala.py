@@ -207,3 +207,34 @@ def test_unpaid_and_onsite_cards_map_conservatively(cfg: Config) -> None:
     assert job.salary_min is None and job.salary_parsed is False  # Unpaid -> UNKNOWN bucket
     assert job.is_remote is None
     assert job.location == "Bangalore"
+
+
+# ── detail-page description (on-demand JD fetch) ─────────────────────────────────────────
+
+
+def test_parse_detail_description_extracts_jd() -> None:
+    from job_aggregator.sources.internshala import parse_detail_description
+
+    html = (
+        "<html><body><div class='top'></div>"
+        "<div class='internship_details'><p>About: build backend APIs.</p>"
+        "<span>Skills: Python, Django</span></div></body></html>"
+    )
+    out = parse_detail_description(html)
+    assert out is not None
+    assert "build backend APIs" in out
+    assert "Python, Django" in out
+
+
+def test_parse_detail_description_missing_selector_is_none() -> None:
+    from job_aggregator.sources.internshala import parse_detail_description
+
+    assert parse_detail_description("<html><body>redesigned, no details div</body></html>") is None
+
+
+def test_fetch_detail_description_rejects_non_detail_url() -> None:
+    from job_aggregator.sources.internshala import fetch_detail_description
+
+    # a listing URL (not a /internship/detail/ page) -> None without any network call
+    assert fetch_detail_description("https://internshala.com/internships/backend/") is None
+    assert fetch_detail_description("https://example.com/x") is None

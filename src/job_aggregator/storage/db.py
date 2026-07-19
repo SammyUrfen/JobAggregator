@@ -21,7 +21,8 @@ BUSY_TIMEOUT_MS = 5000
 # Forward-only schema version stamped in PRAGMA user_version; bump when a migration lands.
 # v2: jobs.is_internship column + title-regex backfill of existing rows.
 # v3: jobs.extra_context column (user context feeding tailoring + apply field-fill).
-SCHEMA_VERSION = 3
+# v4: jobs.seen ("read, no action") + jobs.full_description (on-demand-fetched full JD).
+SCHEMA_VERSION = 4
 
 _MEMORY_DB = ":memory:"
 
@@ -57,11 +58,14 @@ def migrate(conn: sqlite3.Connection) -> None:
     v1->v2 adds jobs.is_internship and backfills it from titles; v2->v3 adds jobs.extra_context."""
     row = conn.execute("PRAGMA user_version").fetchone()
     current: int = 0 if row is None else int(row[0])
-    _V2, _V3 = 2, 3  # migration ids  # noqa: N806 - read as constants
+    _V2, _V3, _V4 = 2, 3, 4  # migration ids  # noqa: N806 - read as constants
     if current < _V2:
         _migrate_v2_is_internship(conn)
     if current < _V3:
         _add_column_if_absent(conn, "extra_context", "TEXT")
+    if current < _V4:
+        _add_column_if_absent(conn, "seen", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_absent(conn, "full_description", "TEXT")
     if current < SCHEMA_VERSION:
         # PRAGMA does not accept bound params; SCHEMA_VERSION is an int constant we control,
         # so interpolating it is safe (never user input).

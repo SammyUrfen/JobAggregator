@@ -12,7 +12,7 @@
   {%- endif -%}
 {% endmacro %}
 
-{# The apply / bookmark / hide quick-actions, shared by card and detail footer. #}
+{# The apply / bookmark / seen / hide quick-actions, shared by card and detail footer. #}
 {% macro quick_actions(job) %}
   <button type="button" class="row-action {% if job.applied %}on{% endif %}"
           data-uid="{{ job.job_uid }}" data-action="{{ 'unapply' if job.applied else 'apply' }}">
@@ -22,6 +22,11 @@
           data-uid="{{ job.job_uid }}" data-action="{{ 'unbookmark' if job.bookmarked else 'bookmark' }}"
           aria-label="{{ 'Remove bookmark' if job.bookmarked else 'Bookmark' }}">
     {{ '★' if job.bookmarked else '☆' }}
+  </button>
+  <button type="button" class="row-action {% if job.seen %}on{% endif %}"
+          data-uid="{{ job.job_uid }}" data-action="{{ 'unseen' if job.seen else 'seen' }}"
+          title="Mark as read — you've looked but decided to wait / not apply">
+    {{ '✓ Seen' if job.seen else 'Seen' }}
   </button>
   <button type="button" class="row-action {% if job.hidden %}on{% endif %}"
           data-uid="{{ job.job_uid }}" data-action="{{ 'unhide' if job.hidden else 'hide' }}">

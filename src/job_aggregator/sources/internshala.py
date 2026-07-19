@@ -14,6 +14,7 @@ run — never a crash, and (per the stale guard) never a mass-expiry of previous
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from datetime import datetime, timedelta
@@ -36,8 +37,17 @@ if TYPE_CHECKING:
     from job_aggregator.clock import Clock
     from job_aggregator.config.schema import Config
 
+log = logging.getLogger(__name__)
+
 _BASE = "https://internshala.com"
 _CARDS_PER_PAGE = 50  # observed page size; a short page ends pagination
+# The real job description lives on the DETAIL page (the listing card only carries the category
+# slug). We fetch it ON DEMAND when the user opens a job — a human action, one page at a time —
+# not in the automated run (robots is ambiguous about bulk detail crawling). `.internship_details`
+# holds the "About the internship" + skills + who-can-apply blocks (selector verified live).
+_DETAIL_SELECTOR = ".internship_details"
+# Detail HTML can be large; cap what we store (the modal renderer caps display anyway).
+_MAX_DETAIL_CHARS = 12000
 # Stipend text is native INR/month: "₹ 15,000 - 30,000 /month" | "₹ 20,000 /month" | "Unpaid".
 _STIPEND_RE = re.compile(r"₹\s*([\d,]+)(?:\s*-\s*([\d,]+))?\s*/month")
 # "4 days ago" / "2 weeks ago" / "1 month ago"; "Today"/"Just now"/"Few hours ago" -> now.
@@ -75,6 +85,31 @@ def _parse_ago(text: str | None, now: datetime) -> datetime | None:
 def _card_text(card: Any, selector: str) -> str | None:
     el = card.select_one(selector)
     return el.get_text(" ", strip=True) if el else None
+
+
+def parse_detail_description(html: str) -> str | None:
+    """Extract the real JD HTML (`.internship_details`) from a detail page, or None if the
+    selector isn't present (a redesign / a non-detail page). Pure + testable against a fixture."""
+    soup = BeautifulSoup(html, "html.parser")
+    el = soup.select_one(_DETAIL_SELECTOR)
+    if el is None:
+        return None
+    inner = el.decode_contents().strip()
+    return inner[:_MAX_DETAIL_CHARS] or None
+
+
+def fetch_detail_description(url: str) -> str | None:
+    """The real Internshala JD for one posting URL, fetched live (best-effort). Any failure —
+    non-Internshala URL, network error, selector gone — returns None so the caller keeps the
+    listing slug. Human-triggered (called when the user opens the job), never in the daily run."""
+    if "internshala.com/internship/detail/" not in url:
+        return None
+    try:
+        with make_client() as client:
+            return parse_detail_description(get_text(client, url))
+    except SourceError as exc:
+        log.info("internshala detail fetch failed for %s: %s", url, exc)
+        return None
 
 
 def parse_listing_page(html: str) -> list[dict[str, Any]]:

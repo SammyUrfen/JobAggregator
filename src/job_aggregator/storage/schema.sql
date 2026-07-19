@@ -60,10 +60,14 @@ CREATE TABLE IF NOT EXISTS jobs (
   applied          INTEGER NOT NULL DEFAULT 0,
   bookmarked       INTEGER NOT NULL DEFAULT 0,
   hidden           INTEGER NOT NULL DEFAULT 0,
+  seen             INTEGER NOT NULL DEFAULT 0,   -- "I read this, decided to wait / not apply"
   notes            TEXT,
   -- user-supplied extra context (full posting text pasted from the site, field-fill hints);
   -- feeds résumé tailoring AND the apply agent's form-filling. A user field: survives re-fetch.
-  extra_context    TEXT
+  extra_context    TEXT,
+  -- full posting description fetched on demand (e.g. Internshala's real JD, whose listing only
+  -- gives a slug). Preserved across re-fetch so it isn't clobbered by the source's short text.
+  full_description TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status     ON jobs(status);

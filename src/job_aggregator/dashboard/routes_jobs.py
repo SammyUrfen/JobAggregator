@@ -103,6 +103,8 @@ _ACTIONS = {
     "unbookmark": ("bookmarked", 0),
     "hide": ("hidden", 1),
     "unhide": ("hidden", 0),
+    "seen": ("seen", 1),  # "I read this, decided to wait / not apply"
+    "unseen": ("seen", 0),
 }
 
 
@@ -261,12 +263,15 @@ class JobQuery:
     applied: bool = False
     bookmarked: bool = False
     intern: bool = False  # internships only (jobs.is_internship = 1)
+    hide_seen: bool = False  # drop rows the user marked 'seen' (focus on un-reviewed)
     sort: str = "score"
     page: int = 1
 
 
 class JobAction(BaseModel):
-    action: Literal["apply", "unapply", "bookmark", "unbookmark", "hide", "unhide"]
+    action: Literal[
+        "apply", "unapply", "bookmark", "unbookmark", "hide", "unhide", "seen", "unseen"
+    ]
 
 
 def _parse_job_query(params: QueryParams) -> JobQuery:
@@ -300,6 +305,7 @@ def _parse_job_query(params: QueryParams) -> JobQuery:
         applied=params.get("applied") in _TRUTHY,
         bookmarked=params.get("bookmarked") in _TRUTHY,
         intern=params.get("intern") in _TRUTHY,
+        hide_seen=params.get("hide_seen") in _TRUTHY,
         sort=sort,
         page=page,
     )
@@ -334,6 +340,8 @@ def _build_where(query: JobQuery) -> tuple[str, list[Any]]:
         clauses.append("bookmarked = 1")
     if query.intern:
         clauses.append("is_internship = 1")
+    if query.hide_seen:
+        clauses.append("seen = 0")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     return where, params
 
@@ -384,6 +392,30 @@ def index(
     return templates.TemplateResponse(request, "jobs.html", context)
 
 
+# Sources whose API returns only a truncated preview description (the full JD is on the posting).
+_PREVIEW_DESC_SOURCES = frozenset({"adzuna", "jooble"})
+
+
+def effective_description(conn: sqlite3.Connection, row: sqlite3.Row) -> str | None:
+    """The best description for a job: a previously-cached `full_description`, else — for an
+    Internshala job whose listing only stored the category slug — fetch the real JD on demand
+    and cache it (survives re-fetch), else the stored `description`. Best-effort: a failed fetch
+    falls back to the slug, never an error."""
+    keys = row.keys()
+    full = row["full_description"] if "full_description" in keys else None
+    if full:
+        return str(full)
+    if row["source"] == "internshala":
+        from job_aggregator.sources.internshala import fetch_detail_description
+
+        fetched = fetch_detail_description(row["url"])
+        if fetched:
+            jobs_repo.set_user_flag(conn, row["job_uid"], "full_description", fetched)
+            return fetched
+    desc: str | None = row["description"]
+    return desc
+
+
 @router.get("/api/jobs/{uid}/detail", response_class=HTMLResponse)
 def job_detail(
     uid: str,
@@ -392,13 +424,18 @@ def job_detail(
     cfg: Config = Depends(get_config),
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
-    """Detail-modal body for one job: facts + a safe-rendered description + the original link."""
+    """Detail-modal body for one job: facts + a safe-rendered description + the original link.
+    Internshala descriptions are enriched on first open (the listing only has the slug)."""
     row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
     if row is None:
         raise NotFoundError("job not found", details={"uid": uid})
     context = {
         "job": row,
-        "description_html": render_description_html(row["description"]),
+        "description_html": render_description_html(effective_description(conn, row)),
+        # Adzuna/Jooble APIs return a truncated preview — tell the user the full text is on the
+        # posting (only when we don't have a fuller cached description).
+        "description_is_preview": row["source"] in _PREVIEW_DESC_SOURCES
+        and not (("full_description" in row.keys()) and row["full_description"]),
         "apply_enabled": cfg.apply.enabled,
     }
     return templates.TemplateResponse(request, "partials/job_detail.html", context)
@@ -450,11 +487,20 @@ def _effective_context(conn: sqlite3.Connection, uid: str, sent: str | None) -> 
     return (stored["extra_context"] or "") if stored is not None else ""
 
 
+def _row_description(row: sqlite3.Row) -> str | None:
+    """The richest stored description for a row: a cached full_description (e.g. Internshala's
+    fetched JD) over the source's short one. Does NOT fetch — callers off the modal path use
+    what's already stored."""
+    keys = row.keys()
+    full = row["full_description"] if "full_description" in keys else None
+    return str(full) if full else row["description"]
+
+
 def _build_jd(row: sqlite3.Row, extra_context: str) -> str:
-    """The job-description text fed to tailoring: title + source description + the user's extra
-    context (the real posting text / notes they pasted — often the ONLY real content for a
-    thin-description source like Internshala/Unstop)."""
-    jd = f"{row['title']}\n{html_to_text(row['description'])}"
+    """The job-description text fed to tailoring: title + description (the cached full JD when we
+    have one) + the user's extra context (the real posting text / notes they pasted — often the
+    ONLY real content for a thin-description source like Internshala/Unstop)."""
+    jd = f"{row['title']}\n{html_to_text(_row_description(row))}"
     if extra_context.strip():
         jd += f"\n\nAdditional context:\n{extra_context.strip()}"
     return jd

@@ -19,9 +19,14 @@ from job_aggregator.models.job import Job, JobStatus, SalaryBucket
 
 UpsertOutcome = Literal["new", "updated"]
 
-# Columns the user owns; a source re-fetch must never overwrite them.
-_USER_FLAG_FIELDS = frozenset({"applied", "bookmarked", "hidden", "notes", "extra_context"})
-_BOOL_FLAG_FIELDS = frozenset({"applied", "bookmarked", "hidden"})
+# Columns the user owns (or that are expensively cached); a source re-fetch must never overwrite
+# them — none appear in the upsert's INSERT/DO UPDATE, so they default on insert + persist on
+# conflict. full_description is fetched on demand (Internshala's real JD) and must not be
+# clobbered by the source's short listing text.
+_USER_FLAG_FIELDS = frozenset(
+    {"applied", "bookmarked", "hidden", "seen", "notes", "extra_context", "full_description"}
+)
+_BOOL_FLAG_FIELDS = frozenset({"applied", "bookmarked", "hidden", "seen"})
 
 # Dashboard pagination bounds.
 DEFAULT_PAGE_LIMIT = 50

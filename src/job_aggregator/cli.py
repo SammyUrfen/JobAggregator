@@ -206,6 +206,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 "using the deterministic selector fill"
             )
         driver = PlaywrightDriver(backend=llm_backend)
+    # Prefer the cached full JD (e.g. Internshala's fetched description) over the short listing.
+    row_dict = dict(row)
     job = Job.model_validate(
         {
             "job_uid": row["job_uid"],
@@ -214,7 +216,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             "company": row["company"],
             "url": row["url"],
             "location": row["location"],
-            "description": row["description"],
+            "description": row_dict.get("full_description") or row["description"],
             "is_remote": bool(row["is_remote"]) if row["is_remote"] is not None else None,
         }
     )
