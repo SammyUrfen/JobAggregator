@@ -187,10 +187,23 @@ claude-only. Live-verified: for an ML JD Claude chose TraceLens/NoteLens/ML-from
 Form-Controller (swapped one vs keyword ranking), 100% preservation, ~60s (reads all 15 projects —
 UI note says ~1 min).
 
+**Apply agent now DRAFTS screening answers (`442028a`, 508 passed):** a real internshala run
+reached the form, uploaded the résumé, filled availability, then LEFT the screening question
+blank — because the agent only had contact fields + extra_context and HARD RULE 4 said "never
+invent an answer". Fix: `build_background(profile)` builds a condensed factual background
+(summary + ambitions + education + skills + projects with 2 bullets each), carried on
+`ApplicationFields.background` (NOT in text_map — not a form value); `build_apply_prompt` adds an
+APPLICANT BACKGROUND block and a new rule 5: DRAFT concise truthful first-person answers to
+open-ended/screening/essay questions grounded ONLY in background + extra_context (no invented
+employers/numbers/tech), never leave blank — the human reviews before submit. Rule 4 now only
+leaves genuinely-unknown FACTUAL fields blank (dates, exact years, demographics). extra_context
+is highest-priority for answers.
+
 **Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
-by the user (headless smokes + a real internshala launch that was Stop-tested); LinkedIn Easy
-Apply remains best-effort (anti-bot); résumé tailoring blocks ~60s on the LLM (one call reading
-the whole portfolio, honest UI note); the anti-fabrication guard is numeric-only; dashboard auth /
+by the user (it now reaches + drafts the whole form incl. screening Qs; a real headful run is
+still the pending check); LinkedIn Easy Apply remains best-effort (anti-bot); résumé tailoring
+blocks ~60s on the LLM (one call reading the whole portfolio, honest UI note); the
+anti-fabrication guard is numeric-only (drafted prose answers rely on review); dashboard auth /
 cross-process run-lock / fuzzy-dedup remain documented limitations.
 
 **Auto-apply extension (post-v1) — in progress.** Design + verified research in
