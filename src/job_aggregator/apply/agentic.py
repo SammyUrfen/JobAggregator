@@ -80,20 +80,25 @@ def build_apply_prompt(fields: ApplicationFields, url: str) -> str:
     data = dict(fields.text_map())
     context = (fields.extra_context or "").strip()
     context_block = (
-        f"\nADDITIONAL CONTEXT the user provided for THIS job (use it to answer specific fields "
-        f"— notice period, availability, screening questions, 'why this role', etc. — WHEN a "
-        f"field clearly asks for it; it is still subject to rule 4, never invent beyond it):\n"
-        f"{context}\n"
+        f"\nADDITIONAL CONTEXT the user provided for THIS job (highest-priority material for "
+        f"screening answers — notice period, availability, 'why this role', etc.):\n{context}\n"
         if context
+        else ""
+    )
+    background = (fields.background or "").strip()
+    background_block = (
+        f"\nAPPLICANT BACKGROUND (true facts — DRAFT screening/essay answers from this; you may "
+        f"paraphrase but add NO fact beyond it):\n{background}\n"
+        if background
         else ""
     )
     return f"""You are operating a browser (the mcp tools named mcp__{MCP_SERVER_NAME}__*) to
 fill ONE job application. The browser currently shows: {url}
 
-APPLICANT DATA (the ONLY facts you may enter):
+APPLICANT DATA (exact values for fixed fields — name, email, phone, links):
 {json.dumps(data, indent=2)}
 Résumé file to upload where a resume/CV is asked: {fields.resume_path}
-{context_block}
+{context_block}{background_block}
 HARD RULES — read carefully:
 1. NEVER submit the application. Do not click Submit / Send / Apply now (final) /
    Review & submit, and never press Enter in a way that submits. Fill everything, then STOP.
@@ -108,12 +113,20 @@ HARD RULES — read carefully:
    with mcp__{MCP_SERVER_NAME}__browser_wait_for (about 15 seconds) and re-snapshot, repeating
    for up to 10 minutes while the human logs in IN THIS WINDOW. Only once the form is actually
    visible again do you continue. If it never clears, report needs_login=true and stop.
-4. Enter ONLY the applicant data above. Leave anything you don't have empty (cover letter,
-   demographic surveys, salary expectations) and report it as unfilled. Never invent an answer.
-5. If the page offers several apply paths, prefer the one that stays on this site
+4. Fixed fields (name/email/phone/URLs): use APPLICANT DATA exactly. Factual fields you don't
+   have a value for (exact dates, precise years-of-experience, demographic surveys, a salary
+   you weren't told): leave empty, report unfilled — never guess a specific fact.
+5. ANSWER the screening / open-ended / essay questions — do NOT leave them blank. This includes
+   "why this role/company", "describe your relevant experience", "your strengths", and short
+   approach/design questions. DRAFT a concise, specific, first-person answer grounded ONLY in
+   the ADDITIONAL CONTEXT and APPLICANT BACKGROUND above. Do not invent employers, numbers, or
+   technologies not present there. Match the field's length (a sentence or two unless it asks
+   for more). The human reviews every answer before submitting, so a solid honest draft is
+   exactly what's wanted — a blank is a failure.
+6. If the page offers several apply paths, prefer the one that stays on this site
    (Easy/Quick Apply) over an external redirect; follow the redirect only if it is the sole
    path.
-6. If a new tab opens, switch to it with mcp__{MCP_SERVER_NAME}__browser_tabs.
+7. If a new tab opens, switch to it with mcp__{MCP_SERVER_NAME}__browser_tabs.
 
 When you are done (form filled, or genuinely stuck), end your reply with ONE final line,
 machine-parsed:

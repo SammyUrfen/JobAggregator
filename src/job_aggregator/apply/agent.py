@@ -65,11 +65,46 @@ def _link_for(profile: Profile, *labels: str) -> str | None:
     return None
 
 
+# Cap the background handed to the apply agent (prompt size); a couple of bullets per project
+# is enough substance to DRAFT a screening answer from without dumping the whole résumé.
+_BG_BULLETS_PER_PROJECT = 2
+
+
+def build_background(profile: Profile) -> str:
+    """A condensed, factual applicant background the apply agent DRAFTS screening/essay answers
+    from — summary, ambitions, projects (name/tagline/tech + a couple of bullets), skills,
+    education. Everything here is true (straight from the ground-truth profile); the agent may
+    paraphrase but must not add facts beyond it."""
+    lines: list[str] = []
+    if profile.summary:
+        lines.append(profile.summary)
+    if profile.ambitions:
+        lines.append(f"Aim: {profile.ambitions}")
+    for edu in profile.education:
+        grade = f", {edu.grade}" if edu.grade else ""
+        lines.append(f"Education: {edu.degree}, {edu.institution}{grade}")
+    if profile.skills:
+        lines.append(
+            "Skills — " + "; ".join(f"{g.category}: {', '.join(g.items)}" for g in profile.skills)
+        )
+    if profile.projects:
+        lines.append("Projects:")
+        for p in profile.projects:
+            tech = f" [{', '.join(p.tech)}]" if p.tech else ""
+            lines.append(f"- {p.name}: {p.tagline or ''}{tech}".rstrip())
+            for bullet in p.bullets[:_BG_BULLETS_PER_PROJECT]:
+                lines.append(f"    • {bullet}")
+    if profile.achievements:
+        lines.append("Achievements: " + "; ".join(profile.achievements))
+    return "\n".join(lines)
+
+
 def build_fields(
     profile: Profile, resume_pdf: str, extra_context: str | None = None
 ) -> ApplicationFields:
     """Assemble the applicant field map from the profile + the tailored résumé PDF path.
-    `extra_context` is the user's per-job notes (carried through for the agent's field-fill)."""
+    `extra_context` is the user's per-job notes; `background` is the profile the agent drafts
+    screening answers from (both carried through for the agent's form-fill)."""
     c = profile.contact
     first, last = _split_name(c.name)
     return ApplicationFields(
@@ -83,6 +118,7 @@ def build_fields(
         linkedin=_link_for(profile, "linkedin"),
         github=_link_for(profile, "github"),
         extra_context=extra_context,
+        background=build_background(profile),
     )
 
 

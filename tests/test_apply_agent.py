@@ -57,6 +57,21 @@ def test_build_fields_from_profile() -> None:
     assert f.first_name  # non-empty
 
 
+def test_build_fields_includes_background_for_screening_answers() -> None:
+    from job_aggregator.apply.agent import build_background
+
+    p = _profile()
+    f = build_fields(p, "/tmp/r.pdf")
+    # the agent needs profile substance to DRAFT screening answers (not leave them blank)
+    assert f.background  # non-empty
+    if p.projects:  # type: ignore[attr-defined]
+        assert p.projects[0].name in f.background  # type: ignore[attr-defined]
+    # background is NOT a form value — it must not leak into the fill map
+    assert "background" not in f.text_map()
+    # build_background is deterministic + reads only the profile
+    assert build_background(p) == f.background
+
+
 def test_apply_refuses_auto_submit() -> None:
     with pytest.raises(AgentError):
         apply_to_job(_job(), _profile(), _cfg(auto_submit=True), driver=FakeDriver())

@@ -56,7 +56,34 @@ def test_prompt_embeds_only_applicant_data_and_resume() -> None:
     prompt = build_apply_prompt(_FIELDS, "https://x.example/job")
     assert '"email": "t@example.com"' in prompt
     assert "/tmp/resume.pdf" in prompt
-    assert "Never invent an answer" in prompt
+    assert "Do not invent employers" in prompt  # anti-fabrication for drafted answers
+
+
+def test_prompt_answers_screening_questions_not_blank() -> None:
+    prompt = build_apply_prompt(_FIELDS, "https://x.example/job")
+    # the rule that fixes "reached the questions but left them blank"
+    assert "ANSWER the screening" in prompt
+    assert "do NOT leave them blank" in prompt
+    assert "a blank is a failure" in prompt
+
+
+def test_prompt_includes_background_when_present() -> None:
+    fields = ApplicationFields(
+        full_name="T",
+        first_name="T",
+        last_name="P",
+        email="t@e.com",
+        resume_path="/tmp/r.pdf",
+        background="Systems engineer. Projects:\n- WALterDB: C++20 database engine",
+    )
+    prompt = build_apply_prompt(fields, "https://x/job")
+    assert "APPLICANT BACKGROUND (true facts" in prompt  # the data block header
+    assert "WALterDB: C++20 database engine" in prompt
+
+
+def test_prompt_omits_background_when_absent() -> None:
+    # the block header is gone (the phrase still appears inside rule 5, so anchor on the header)
+    assert "APPLICANT BACKGROUND (true facts" not in build_apply_prompt(_FIELDS, "https://x/job")
 
 
 def test_prompt_names_the_mcp_tools() -> None:
@@ -274,7 +301,7 @@ def test_prompt_includes_extra_context_when_present() -> None:
     prompt = build_apply_prompt(fields, "https://x.example/job")
     assert "ADDITIONAL CONTEXT" in prompt
     assert "Notice period: 0 days" in prompt
-    assert "never invent beyond it" in prompt  # still bound by the no-fabrication rule
+    assert "highest-priority material for screening answers" in prompt
 
 
 def test_prompt_omits_context_section_when_absent() -> None:
@@ -285,4 +312,5 @@ def test_prompt_omits_context_section_when_absent() -> None:
         email="t@e.com",
         resume_path="/tmp/r.pdf",
     )
-    assert "ADDITIONAL CONTEXT" not in build_apply_prompt(fields, "https://x/job")
+    # "ADDITIONAL CONTEXT" also appears in rule 5, so anchor on the block header
+    assert "ADDITIONAL CONTEXT the user provided" not in build_apply_prompt(fields, "https://x/job")

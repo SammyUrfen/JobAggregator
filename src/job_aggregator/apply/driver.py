@@ -37,6 +37,11 @@ class ApplicationFields:
     # Free-text the user pasted for THIS job (full posting, notes, screening-question answers).
     # NOT a form value — guidance the agent may use to answer specific fields (see text_map).
     extra_context: str | None = None
+    # A condensed, factual summary of the applicant's profile (summary + projects + skills +
+    # education). NOT a form value — the material the agent DRAFTS screening/essay answers from
+    # ("why this role", "describe your experience", short design questions) instead of leaving
+    # them blank. Everything in it is true (built from the ground-truth profile).
+    background: str | None = None
 
     def text_map(self) -> dict[str, str]:
         """Non-file fields as a flat {logical_name: value} map (drops None + the résumé file)."""
