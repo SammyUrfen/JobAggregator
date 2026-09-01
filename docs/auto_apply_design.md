@@ -205,7 +205,9 @@ Wire it before touching the browser — fully testable today:
   → `render_latex` → `compile_pdf`. Print the preservation score + flags.
 - **Dashboard:** `POST /api/jobs/{uid}/tailor` returning the tailored preview (selected projects,
   flags, preservation) + a **"Tailor résumé"** button in the detail modal (`job_detail.html`). The
-  PDF download link points at the compiled artifact under `data/resumes/<uid>.pdf`.
+  PDF download link points at the compiled artifact under
+  `data/resumes/<company>_<job title>_<YYYY-MM-DD>.pdf` (the route still keys on the job_uid; the
+  filename is derived from the DB row, so it is human-readable without being caller-controlled).
 - Keep the backend call behind the existing `AgentBackend` seam so tests inject a fake.
 
 ### Step 1 — optional dependencies

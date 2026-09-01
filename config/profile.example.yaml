@@ -7,6 +7,14 @@
 #
 # ⚠️  Truthfulness rule: the tailor may re-order / re-emphasize / re-word what is here, but it must
 #     NEVER invent a project, employer, date, metric, or skill that is not present. Keep it factual.
+#
+# HOW TO WRITE A BULLET: a compressed engineering story — the PROBLEM that forced the work, WHY the
+# obvious approach was inadequate, WHAT mechanism solved it, and the OUTCOME. Not a catalogue of
+# what you touched. Leave OUT lines-of-code counts, file/class/commit counts, bare technology lists,
+# and adjectives standing in for evidence; name a technology where the choice was load-bearing and
+# put the rest in `tech:`. Numbers that earn their place are outcomes — throughput, latency, a score
+# delta, defects found. The tailoring prompt asks the model for this same shape.
+#
 # Bullets are PLAIN TEXT facts (no LaTeX) — the renderer adds emphasis/escaping later.
 
 contact:
@@ -49,10 +57,11 @@ projects:
     tags: [backend, systems, distributed]
     bullets:
       - >-
-        One factual achievement line — what you built, a key design decision, and a metric
-        (e.g. throughput, latency, LOC, test count). Keep it true.
+        The problem that forced this work, and why the obvious approach did not survive contact
+        with it — one or two sentences, concrete, true.
       - >-
-        A second factual line — another concrete decision or result.
+        The mechanism you built to solve it, named specifically enough that a reader finishes the
+        line knowing something real about how the system works, plus the outcome it produced.
 
 skills:
   - category: Languages

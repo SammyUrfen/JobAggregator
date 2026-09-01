@@ -103,7 +103,7 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     from job_aggregator.config.store import load_effective_config
     from job_aggregator.errors import NotFoundError, RenderError
     from job_aggregator.logging_setup import configure_logging
-    from job_aggregator.paths import resumes_dir
+    from job_aggregator.paths import resume_path
     from job_aggregator.profile.store import load_profile
     from job_aggregator.resume.render import compile_pdf, render_latex
     from job_aggregator.resume.tailor import tailor_resume
@@ -112,7 +112,7 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
     conn = connect(args.db)
     row = conn.execute(
-        "SELECT title, description FROM jobs WHERE job_uid = ?", (args.uid,)
+        "SELECT company, title, description FROM jobs WHERE job_uid = ?", (args.uid,)
     ).fetchone()
     if row is None:
         raise NotFoundError("job not found", details={"uid": args.uid})
@@ -134,7 +134,7 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     )
     for flag in tailored.flags:
         print(f"  ! {flag}")
-    out = Path(args.out) if args.out else resumes_dir() / f"{args.uid}.pdf"
+    out = Path(args.out) if args.out else resume_path(row["company"], row["title"])
     tex = render_latex(profile, tailored)
     try:
         compile_pdf(tex, out)
@@ -289,7 +289,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="reword bullets via the configured backend (default: pure selection, no network)",
     )
     p_tailor.add_argument(
-        "--out", default=None, help="output PDF path (default data/resumes/<uid>.pdf)"
+        "--out",
+        default=None,
+        help="output PDF path (default data/resumes/<company>_<title>_<date>.pdf)",
     )
     p_tailor.set_defaults(func=cmd_tailor)
 

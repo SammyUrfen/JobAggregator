@@ -270,3 +270,44 @@ def test_try_build_backend_openai_missing_key(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert backends.try_build_backend(ResumeConfig(backend="openai_compatible")) is None
+
+
+# ── résumé filenames: company + job title + date, not a job_uid hash ──
+
+
+def test_resume_path_is_named_for_the_job_and_dated(monkeypatch, tmp_path: Path) -> None:
+    from datetime import date
+
+    from job_aggregator import paths
+
+    monkeypatch.setenv("JOBAGG_DATA_DIR", str(tmp_path))
+    out = paths.resume_path("Acme Corp.", "Senior Backend Engineer", when=date(2026, 9, 1))
+    assert out.name == "acme-corp_senior-backend-engineer_2026-09-01.pdf"
+    assert out.parent == paths.resumes_dir()
+
+
+def test_resume_path_slug_cannot_escape_the_resumes_dir(monkeypatch, tmp_path: Path) -> None:
+    """A job board can put anything in a company name; the slug must stay [a-z0-9-]."""
+    from datetime import date
+
+    from job_aggregator import paths
+
+    monkeypatch.setenv("JOBAGG_DATA_DIR", str(tmp_path))
+    out = paths.resume_path("../../etc", "pa/ss?wd", when=date(2026, 9, 1))
+    assert out.parent == paths.resumes_dir()
+    assert out.name == "etc_pa-ss-wd_2026-09-01.pdf"
+
+
+def test_find_resume_returns_the_newest_and_none_when_absent(monkeypatch, tmp_path: Path) -> None:
+    from datetime import date
+
+    from job_aggregator import paths
+
+    monkeypatch.setenv("JOBAGG_DATA_DIR", str(tmp_path))
+    paths.resumes_dir().mkdir(parents=True)
+    assert paths.find_resume("Acme", "Backend Engineer") is None
+    for day in (1, 15, 3):  # written out of order — resolution must not depend on write order
+        paths.resume_path("Acme", "Backend Engineer", when=date(2026, 9, day)).write_bytes(b"x")
+    newest = paths.find_resume("Acme", "Backend Engineer")
+    assert newest is not None and newest.name.endswith("2026-09-15.pdf")
+    assert paths.find_resume("Other Co", "Backend Engineer") is None  # scoped per company

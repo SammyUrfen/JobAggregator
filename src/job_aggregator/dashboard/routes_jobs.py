@@ -41,7 +41,7 @@ from job_aggregator.dashboard.deps import (
     header_context,
 )
 from job_aggregator.errors import NotFoundError, RenderError
-from job_aggregator.paths import data_dir, default_db_path, resumes_dir
+from job_aggregator.paths import data_dir, default_db_path, find_resume, resume_path
 from job_aggregator.profile.store import load_profile
 from job_aggregator.resume.render import compile_pdf, render_latex
 from job_aggregator.resume.tailor import tailor_resume
@@ -539,7 +539,7 @@ def job_tailor(
     tailored = tailor_resume(profile, jd, backend=_tailor_backend(cfg), config=cfg.resume)
     pdf_ready = False
     try:
-        compile_pdf(render_latex(profile, tailored), resumes_dir() / f"{uid}.pdf")
+        compile_pdf(render_latex(profile, tailored), resume_path(row["company"], row["title"]))
         pdf_ready = True
     except RenderError:
         log.warning("résumé PDF not built for %s (no engine or build failed); preview only", uid)
@@ -553,15 +553,22 @@ def job_tailor(
 
 
 @router.get("/api/jobs/{uid}/resume.pdf")
-def job_resume_pdf(uid: str) -> FileResponse:
-    """Serve a previously-tailored PDF. data/ is not under /static so serve it explicitly; the uid
-    is validated as sha256 hex before it touches the filesystem (path-traversal guard)."""
+def job_resume_pdf(uid: str, conn: sqlite3.Connection = Depends(get_conn)) -> FileResponse:
+    """Serve a previously-tailored PDF. data/ is not under /static so serve it explicitly.
+
+    The URL still keys on the job_uid (validated as sha256 hex — path-traversal guard) even though
+    the file on disk is named for the company and title: the name is derived from the DB row, not
+    from anything the caller sent, and the browser gets that human name via Content-Disposition.
+    """
     if not _JOB_UID_RE.match(uid):
         raise NotFoundError("resume not found", details={"uid": uid})
-    path = resumes_dir() / f"{uid}.pdf"
-    if not path.exists():
+    row = conn.execute("SELECT company, title FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
+    if row is None:
+        raise NotFoundError("job not found", details={"uid": uid})
+    path = find_resume(row["company"], row["title"])
+    if path is None:
         raise NotFoundError("no tailored résumé for this job yet", details={"uid": uid})
-    return FileResponse(path, media_type="application/pdf", filename=f"resume-{uid[:8]}.pdf")
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
 
 
 # How long to watch the spawned apply process for an instant death before reporting success.

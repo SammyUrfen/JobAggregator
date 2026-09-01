@@ -20,7 +20,7 @@ from job_aggregator.apply.ats import detect_ats
 from job_aggregator.apply.driver import ApplicationFields
 from job_aggregator.apply.session import load_state, save_state
 from job_aggregator.errors import AgentError, ConfigError
-from job_aggregator.paths import resumes_dir
+from job_aggregator.paths import resume_path
 from job_aggregator.resume.render import compile_pdf, render_latex
 from job_aggregator.resume.tailor import tailor_resume
 
@@ -151,7 +151,7 @@ def apply_to_job(
     if extra_context and extra_context.strip():
         jd += f"\n\nAdditional context:\n{extra_context.strip()}"
     tailored = tailor_resume(profile, jd, backend=backend, config=cfg.resume)
-    pdf = resumes_dir() / f"{job.job_uid}.pdf"
+    pdf = resume_path(job.company, job.title)
     compile_pdf(render_latex(profile, tailored), pdf)  # RenderError propagates when no LaTeX engine
 
     # 2. field map + deterministic ATS selectors (None -> the driver uses its generic path)

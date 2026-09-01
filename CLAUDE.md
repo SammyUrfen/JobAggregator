@@ -271,6 +271,12 @@ coding-agent/Claude Code). Build order A→B→C→D.
   → preservation scoring + flags (`backend=None` = pure selection, no LLM). `resume/render.py` =
   fill template (LaTeX-escaped) → `.tex` → `compile_pdf` (tectonic/pdflatex seam). Config: `resume.*`,
   `apply.*`. **Live-verified: real profile → tailored → 108 KB PDF.** 304 tests green, 89.8% cov.
+  **PDFs are named `<company>_<job title>_<YYYY-MM-DD>.pdf`** (`paths.resume_path` to write,
+  `paths.find_resume` for newest-wins lookup) — they get attached to real applications, where a
+  job_uid hash tells you nothing; the slug is `[a-z0-9-]` and derived from the DB row, so the
+  filename is human-readable without being caller-controlled. The tailoring system prompt asks for
+  PROBLEM → WHY → MECHANISM → OUTCOME bullets, not LOC/tech-stack catalogues; fabrication stays
+  blocked structurally by the guard, the prompt only shapes voice.
 - **Coverage pass (this session):** `paginate_until_empty` in `sources/_http.py` (loop until empty/
   short page/`max_pages` cap; first-page error fails, later-page error keeps earlier). Applied to
   Adzuna (+`what_or` query targeting), Jooble (+multi-role query), Unstop (per-opportunity). Live:

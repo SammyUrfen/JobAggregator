@@ -180,15 +180,38 @@ def _select_prompt(
     candidates: list[Project], job_description: str, max_projects: int
 ) -> tuple[str, str]:
     """The (system, user) prompt: give the model the JD + EVERY candidate project, ask it to pick
-    the most relevant `max_projects` and reword their bullets, echoing '### <name>' headers."""
+    the most relevant `max_projects` and reword their bullets, echoing '### <name>' headers.
+
+    The rewrite instruction asks for a PROBLEM -> WHY -> MECHANISM -> OUTCOME story rather than a
+    catalogue of what was used. A bullet that says "~7K LOC, C++20, CMake, B+tree" tells a reader
+    nothing they can interview against; "slotted pages let a variable-length row move without
+    invalidating the index entries pointing at it" tells them how the thing works. Fabrication is
+    still blocked structurally downstream (`_guard_bullets`) — the prompt only shapes the voice.
+    """
     system = (
-        "You are an expert résumé editor tailoring a candidate's résumé to ONE job. From the "
+        "You are an expert résumé editor tailoring an engineer's résumé to ONE job. From the "
         f"CANDIDATE PROJECTS, SELECT the {max_projects} most relevant to the JOB, then rewrite "
-        "each selected project's bullets to emphasize job-relevant aspects. STRICT RULES: "
-        "(1) Choose "
-        "ONLY from the given projects — never invent a project. (2) Use ONLY facts present in that "
-        "project's own bullets — never invent numbers, technologies, companies, or outcomes. "
-        "(3) Keep every metric exactly as written. (4) Output at most "
+        "each selected project's bullets to emphasize the parts a reader hiring for THIS job "
+        "cares about.\n"
+        "\n"
+        "HOW TO WRITE A BULLET. Each one tells a compressed engineering story: the PROBLEM that "
+        "forced the work, WHY the obvious approach was inadequate, WHAT was built to solve it, "
+        "and the OUTCOME it produced. Lead with the problem or the design decision, not with the "
+        "verb 'Built'. Name technologies only where the choice was load-bearing — the thing that "
+        "made the solution work — never as a list of everything touched. Prefer the specific "
+        "mechanism ('a wait-for-graph detector that rolls back a victim transaction') over the "
+        "category ('concurrency control'). A reader should finish a bullet knowing something "
+        "true about how the system works.\n"
+        "\n"
+        "DO NOT write résumé filler: no lines-of-code counts, no file/class/module/commit counts, "
+        "no bare technology lists, no adjectives doing the work of evidence ('robust', "
+        "'scalable', 'cutting-edge'). Keep outcome numbers that mean something (throughput, "
+        "latency, a score delta, a defect count) exactly as written.\n"
+        "\n"
+        "STRICT RULES: (1) Choose ONLY from the given projects — never invent a project. "
+        "(2) Use ONLY facts present in that project's own bullets — never invent numbers, "
+        "technologies, companies, or outcomes; reframing is allowed, adding is not. (3) Keep "
+        "every metric exactly as written. (4) Output at most "
         f"{max_projects} projects, most relevant first, each as a line '{_PROJECT_MARK}<exact "
         "project name>' followed by its rewritten bullets (one per line, no numbering, no "
         "commentary between projects)."
