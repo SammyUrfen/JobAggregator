@@ -72,6 +72,24 @@ def test_build_fields_includes_background_for_screening_answers() -> None:
     assert build_background(p) == f.background
 
 
+def test_background_includes_experience() -> None:
+    from job_aggregator.apply.agent import build_background
+    from job_aggregator.profile.schema import Experience
+
+    p = _profile().model_copy(  # type: ignore[attr-defined]
+        update={
+            "experience": [
+                Experience(
+                    company="Apache SkyWalking", title="Contributor", bullets=["Merged a PR."]
+                )
+            ]
+        }
+    )
+    bg = build_background(p)
+    assert "Experience: Contributor, Apache SkyWalking" in bg
+    assert "Merged a PR." in bg
+
+
 def test_apply_refuses_auto_submit() -> None:
     with pytest.raises(AgentError):
         apply_to_job(_job(), _profile(), _cfg(auto_submit=True), driver=FakeDriver())
@@ -86,7 +104,7 @@ def test_apply_fills_never_submits_and_wires_ats(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("JOBAGG_DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(agent_mod, "compile_pdf", lambda tex, out: out)  # skip real LaTeX
+    monkeypatch.setattr(agent_mod, "build_pdf", lambda profile, tailored, out: out)  # no LaTeX
     monkeypatch.setattr(agent_mod, "load_state", lambda domain: None)  # no crypto in tests
     saved: dict[str, object] = {}
     monkeypatch.setattr(

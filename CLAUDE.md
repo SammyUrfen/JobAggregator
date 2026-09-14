@@ -236,6 +236,53 @@ is highest-priority for answers.
 - **`a1175c8`:** apply mcp-config temp file cleaned up via try/finally even on the error path.
   Verified: cookie VALUES are never logged (counts only).
 
+**Résumé story pass (2026-09-15, 550 passed, 91.25% cov):** a live run of the old prompt on a Go
+internship posting found two faults. The model packed every fact into 40–55-word bullets (511 words
+for four projects), and it added the posting's keywords to projects that never used them (PostgreSQL
+on JobAggregator, Docker and REST elsewhere). The numeric guard could not see either fault.
+- **Prompt (`_select_prompt`):** tailoring chooses and never adds. The bullets of one project read as
+  a story: the problem and core idea, then the hardest decision, then the outcome. At most
+  `_MAX_BULLETS_PER_PROJECT = 3` bullets of `_MAX_BULLET_WORDS = 35` words.
+- **Tech guard (`known_tech` + `_guard_bullets`):** a rewrite that names a technology from anywhere in
+  the profile (project tech lines + skills) that the project's own name, tagline, tech, tags and
+  bullets do not name is rejected, with a flag naming the term. Matching is whole-name, allows a
+  version suffix ("C++" matches "C++20"), and ignores case only for terms of 4+ characters. A
+  job-only term (Kubernetes, when no project lists it) still passes (`ponytail:` note).
+- **Flags:** the global "low fact-preservation" flag fired on every run once the prompt allowed
+  leaving out numbers (36–56% in three live runs). It is replaced by a per-project flag when a
+  project keeps NONE of its numbers. The preservation badge still shows the ratio.
+- **Experience renders now.** `render_latex` never printed `profile.experience`, so any entry there
+  vanished from every PDF. `_experience` prints it verbatim before Projects, and `build_background`
+  gives it to the apply agent. The profile's first entry is the Apache SkyWalking BanyanDB work.
+- Live after the fix: 287–372 words of bullets, every bullet at most 35 words, no added technology.
+  Non-numeric drift (for example "division" for "organizational line") is still possible, so read
+  a résumé before you send it.
+
+**Evidence selection, tailored skills, one page (2026-09-15, 563 passed, 91.25% cov):** a real
+backend internship posting picked a set of textbook LLD exercises for "System Design", because the
+model saw projects in keyword order with no strength signal.
+- **Selection (`_select_prompt`):** the model first writes `### NEEDS` (3–5 capabilities read from
+  the responsibilities), then picks projects whose BULLETS prove each need. Projects go to the model
+  in PROFILE ORDER, which is strongest first, and it prefers the earlier one on a tie. The old
+  keyword-sorted `_candidate_pool` is gone. `TailoredResume.needs` shows in the preview and the CLI.
+  An invented header no longer takes a project slot.
+- **Skills (`### SKILLS` + `_guard_skills`):** the model keeps only the rows and items this job
+  needs, capped at `_MAX_SKILL_GROUPS = 4` rows of `_MAX_SKILLS_PER_GROUP = 8`. The guard accepts an
+  item only under its own profile category (or one name inside it), in profile spelling, and flags
+  anything else. Without the model, `select_skills` keeps only items that touch the JD keywords.
+- **Profile YAML trap:** an unquoted flow item like `[a, b (c, d)]` splits into `b (c` and `d)`.
+  The real profile had four such items. They are quoted now, and profile.yaml carries a note.
+- **One page (`render.build_pdf`):** all three PDF call sites (dashboard, CLI, apply agent) use it.
+  It reads the page count from the pdflatex log and trims until one page: the middle bullet of the
+  last project, then that project, never below 2 projects. It mutates `tailored` and flags each trim,
+  so the preview matches the PDF. Tectonic prints no page count, so it builds once, untrimmed
+  (`ponytail:` note). Education grades moved onto the degree line (saves 2 lines each).
+- CLI `tailor` now reads `full_description` (the Internshala slug was its whole JD before).
+- The six old lint errors (`procs.py` SIM105, `routes_jobs.py` lazy imports + `sqlite3.Row.keys()`)
+  are fixed or carry a reasoned `noqa`, so `ruff check .` is green again.
+- Live: that internship posting 1 page with 4 projects, a Java backend posting 1 page after dropping its 4th
+  project, an AI Engineer posting 1 page after one bullet. The model's picks vary between runs.
+
 **Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
 by the user (it now reaches + drafts the whole form incl. screening Qs; a real headful run is
 still the pending check); LinkedIn Easy Apply remains best-effort (anti-bot); résumé tailoring

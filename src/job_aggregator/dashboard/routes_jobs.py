@@ -43,7 +43,7 @@ from job_aggregator.dashboard.deps import (
 from job_aggregator.errors import NotFoundError, RenderError
 from job_aggregator.paths import data_dir, default_db_path, find_resume, resume_path
 from job_aggregator.profile.store import load_profile
-from job_aggregator.resume.render import compile_pdf, render_latex
+from job_aggregator.resume.render import build_pdf
 from job_aggregator.resume.tailor import tailor_resume
 from job_aggregator.storage import jobs_repo
 
@@ -406,7 +406,8 @@ def effective_description(conn: sqlite3.Connection, row: sqlite3.Row) -> str | N
     if full:
         return str(full)
     if row["source"] == "internshala":
-        from job_aggregator.sources.internshala import fetch_detail_description
+        # Lazy: bs4 loads only when a user opens an Internshala job.
+        from job_aggregator.sources.internshala import fetch_detail_description  # noqa: PLC0415
 
         fetched = fetch_detail_description(row["url"])
         if fetched:
@@ -435,7 +436,8 @@ def job_detail(
         # Adzuna/Jooble APIs return a truncated preview — tell the user the full text is on the
         # posting (only when we don't have a fuller cached description).
         "description_is_preview": row["source"] in _PREVIEW_DESC_SOURCES
-        and not (("full_description" in row.keys()) and row["full_description"]),
+        # sqlite3.Row: `in row` tests VALUES, so the .keys() call is required.
+        and not (("full_description" in row.keys()) and row["full_description"]),  # noqa: SIM118
         "apply_enabled": cfg.apply.enabled,
     }
     return templates.TemplateResponse(request, "partials/job_detail.html", context)
@@ -468,7 +470,7 @@ def _tailor_backend(cfg: Config) -> AgentBackend | None:
     `resume.tailor_with_llm` is off OR the backend can't run (missing CLI / API key — degrades to
     deterministic, never a 500). The anti-fabrication guard protects the LLM path either way.
     Tests monkeypatch this to inject a fake."""
-    from job_aggregator.apply.backends import try_build_backend
+    from job_aggregator.apply.backends import try_build_backend  # noqa: PLC0415 (lazy seam)
 
     if not cfg.resume.tailor_with_llm:
         return None
@@ -539,7 +541,8 @@ def job_tailor(
     tailored = tailor_resume(profile, jd, backend=_tailor_backend(cfg), config=cfg.resume)
     pdf_ready = False
     try:
-        compile_pdf(render_latex(profile, tailored), resume_path(row["company"], row["title"]))
+        # Trims `tailored` to one page in place, so the preview below matches the PDF.
+        build_pdf(profile, tailored, resume_path(row["company"], row["title"]))
         pdf_ready = True
     except RenderError:
         log.warning("résumé PDF not built for %s (no engine or build failed); preview only", uid)

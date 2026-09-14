@@ -105,14 +105,17 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     from job_aggregator.logging_setup import configure_logging
     from job_aggregator.paths import resume_path
     from job_aggregator.profile.store import load_profile
-    from job_aggregator.resume.render import compile_pdf, render_latex
+    from job_aggregator.resume.render import build_pdf, render_latex
     from job_aggregator.resume.tailor import tailor_resume
     from job_aggregator.storage.db import connect
 
     configure_logging(args.log_level)
     conn = connect(args.db)
     row = conn.execute(
-        "SELECT company, title, description FROM jobs WHERE job_uid = ?", (args.uid,)
+        # The cached full JD when the dashboard fetched one (Internshala stores only a slug).
+        "SELECT company, title, coalesce(full_description, description) AS description"
+        " FROM jobs WHERE job_uid = ?",
+        (args.uid,),
     ).fetchone()
     if row is None:
         raise NotFoundError("job not found", details={"uid": args.uid})
@@ -128,21 +131,26 @@ def cmd_tailor(args: argparse.Namespace) -> int:
 
         backend = try_build_backend(cfg.resume)
     tailored = tailor_resume(profile, jd, backend=backend, config=cfg.resume)
+    out = Path(args.out) if args.out else resume_path(row["company"], row["title"])
+    built: str
+    try:
+        build_pdf(profile, tailored, out)  # trims `tailored` to one page, so print after it
+        built = f"wrote {out}"
+    except RenderError as exc:  # no engine / build failed -> keep the text preview + the .tex
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.with_suffix(".tex").write_text(render_latex(profile, tailored), encoding="utf-8")
+        built = f"PDF not built ({exc.message}); wrote {out.with_suffix('.tex')} instead"
+    for need in tailored.needs:
+        print(f"need: {need}")
     print(f"projects: {', '.join(p.name for p in tailored.projects)}")
+    for group in tailored.skills:
+        print(f"skills: {group.category}: {', '.join(group.items)}")
     print(
         f"preservation: {tailored.preservation:.0%}   keywords matched: {len(tailored.jd_keywords)}"
     )
     for flag in tailored.flags:
         print(f"  ! {flag}")
-    out = Path(args.out) if args.out else resume_path(row["company"], row["title"])
-    tex = render_latex(profile, tailored)
-    try:
-        compile_pdf(tex, out)
-        print(f"wrote {out}")
-    except RenderError as exc:  # no engine / build failed -> keep the text preview + the .tex
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.with_suffix(".tex").write_text(tex, encoding="utf-8")
-        print(f"PDF not built ({exc.message}); wrote {out.with_suffix('.tex')} instead")
+    print(built)
     return 0
 
 

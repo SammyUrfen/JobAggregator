@@ -9,6 +9,12 @@
     <span class="badge mono">preservation {{ '%.0f'|format(tailored.preservation * 100) }}%</span>
     <span class="badge mono">{{ tailored.jd_keywords|length }} keywords</span>
   </div>
+  {% if tailored.needs %}
+    <div class="tailor-projects">
+      <span class="muted">What the job needs (the model's read):</span>
+      <ul>{% for n in tailored.needs %}<li>{{ n }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
   <div class="tailor-projects">
     <span class="muted">Selected projects:</span>
     <ul>
@@ -19,6 +25,12 @@
       {% endfor %}
     </ul>
   </div>
+  {% if tailored.skills %}
+    <div class="tailor-projects">
+      <span class="muted">Skills on this résumé:</span>
+      <ul>{% for g in tailored.skills %}<li><strong>{{ g.category }}</strong>: {{ g.items|join(', ') }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
   {% if tailored.flags %}
     <ul class="tailor-flags">
       {% for f in tailored.flags %}<li class="warn">⚠ {{ f }}</li>{% endfor %}

@@ -8,12 +8,24 @@ import pytest
 
 from job_aggregator.config.schema import ResumeConfig
 from job_aggregator.errors import AgentError, RenderError
-from job_aggregator.profile.schema import Contact, Education, Profile, Project, SkillGroup
+from job_aggregator.profile.schema import (
+    Contact,
+    Education,
+    Experience,
+    Profile,
+    Project,
+    SkillGroup,
+)
 from job_aggregator.resume import render
 from job_aggregator.resume.tailor import (
+    TailoredResume,
+    _guard_skills,
+    _mentions,
+    known_tech,
     reorder_skills,
     score_project,
     select_projects,
+    select_skills,
     tailor_resume,
 )
 
@@ -25,9 +37,11 @@ class FakeBackend:
         self.response = response
         self.raises = raises
         self.calls = 0
+        self.user = ""  # the last user prompt, so a test can check what the model was shown
 
     def complete(self, system: str, user: str, *, temperature: float = 0.2) -> str:
         self.calls += 1
+        self.user = user
         if self.raises:
             raise AgentError("backend down")
         return self.response
@@ -116,13 +130,101 @@ def test_guard_accepts_rewrite_using_only_source_numbers() -> None:
     assert res.preservation == 1.0  # both source numbers (7, 91) retained
 
 
-def test_low_preservation_is_flagged() -> None:
+def test_guard_rejects_a_technology_the_project_does_not_use() -> None:
+    # The live fault: a job wanted PostgreSQL, and the model gave it to a SQLite project.
+    # PostgreSQL is a real skill from another project, so only the whole-profile check sees it.
+    sqlite_app = Project(
+        name="Aggregator",
+        tech=["Python", "SQLite"],
+        bullets=[
+            "Dedups jobs in SQLite on a content hash.",
+            "Expires a job only on source success.",
+        ],
+    )
+    pg_app = Project(name="Arena", tech=["Java", "PostgreSQL"], bullets=["Runs an auction."])
+    fake = FakeBackend(
+        "### Aggregator\n"
+        "Dedups jobs in PostgreSQL on a content hash.\n"
+        "Expires a job only after its source succeeds, in Python.\n"
+    )
+    res = tailor_resume(
+        _profile(sqlite_app, pg_app),
+        "postgresql",
+        backend=fake,
+        config=ResumeConfig(max_projects=1),
+    )
+    assert res.projects[0].bullets == ["Expires a job only after its source succeeds, in Python."]
+    assert any("added PostgreSQL" in f for f in res.flags)
+
+
+@pytest.mark.parametrize(
+    ("text", "term", "hit"),
+    [
+        ("written in Go.", "Go", True),
+        ("a Google OAuth flow", "Go", False),  # a name inside a longer name
+        ("go and fetch", "Go", False),  # case-sensitive: the word, not the language
+        ("C++20 with CMake", "C++20", True),
+        ("C++20 with CMake", "C++", True),  # a version may follow the name
+        ("Java 21 and Spring", "Java", True),
+        ("PostgreSQL/PostGIS geofence", "PostGIS", True),
+        ("SQLite tables", "SQL", False),
+    ],
+)
+def test_mentions_matches_whole_names_only(text: str, term: str, hit: bool) -> None:
+    assert _mentions(text, term) is hit
+
+
+def test_known_tech_splits_items_and_skips_plain_words() -> None:
+    prof = _profile(Project(name="X", tech=["PostgreSQL/PostGIS", "queue", "eBPF (bcc/bpftrace)"]))
+    tech = known_tech(prof)
+    assert {"PostgreSQL", "PostGIS", "eBPF", "Go", "C++"} <= tech  # "Go"/"C++" from skills
+    assert "queue" not in tech and "bcc" not in tech  # lowercase words are not guarded
+
+
+def test_guard_ignores_case_for_words_but_not_for_short_names() -> None:
+    # "Concurrency" is a skill item. The project's tag says "concurrency", so the rewrite is honest.
+    # "Go" is short: the English "go" in a bullet must not license the language.
+    locks = Project(
+        name="Arena",
+        tech=["Java"],
+        tags=["concurrency"],
+        bullets=["Bids go through one lock per auction."],
+    )
+    other = Project(name="Mesh", tech=["Go"], bullets=["Relays video."])
+    prof = _profile(locks, other).model_copy(
+        update={"skills": [SkillGroup(category="Core", items=["Concurrency"])]}
+    )
+    fake = FakeBackend(
+        "### Arena\nConcurrency: bids go through one lock per auction.\nBids run in Go.\n"
+    )
+    res = tailor_resume(prof, "java", backend=fake, config=ResumeConfig(max_projects=1))
+    assert res.projects[0].bullets == ["Concurrency: bids go through one lock per auction."]
+    assert any("added Go" in f for f in res.flags)
+
+
+def test_guard_caps_bullets_per_project() -> None:
+    wide = Project(name="Wide", tech=["Go"], bullets=[f"Fact {n}." for n in range(1, 6)])
+    fake = FakeBackend("### Wide\n" + "".join(f"Fact {n}.\n" for n in range(1, 6)))
+    res = tailor_resume(_profile(wide), "go", backend=fake, config=ResumeConfig(max_projects=1))
+    assert res.projects[0].bullets == ["Fact 1.", "Fact 2.", "Fact 3."]
+
+
+def test_project_that_keeps_none_of_its_numbers_is_flagged() -> None:
     fake = FakeBackend("Built a database engine.")  # drops the 7K / 91 metrics (no new numbers)
     res = tailor_resume(
         _profile(_DB), "database", backend=fake, config=ResumeConfig(max_projects=1)
     )
     assert res.preservation < 0.8
-    assert any("preservation" in f for f in res.flags)
+    assert any("WALterDB: kept none of its numbers" in f for f in res.flags)
+
+
+def test_keeping_one_number_of_several_is_not_flagged() -> None:
+    # Leaving out a number that this job does not need is allowed by the prompt.
+    fake = FakeBackend("Built a DB engine in C++20 with 91 tests.")
+    res = tailor_resume(
+        _profile(_DB), "database", backend=fake, config=ResumeConfig(max_projects=1)
+    )
+    assert not [f for f in res.flags if "numbers" in f]
 
 
 def test_backend_failure_degrades_to_original() -> None:
@@ -146,6 +248,33 @@ def test_render_latex_includes_facts_and_wraps_document() -> None:
     assert "A Dev" in tex and "a@b.com" in tex  # header
 
 
+def test_render_latex_includes_experience_before_projects() -> None:
+    # Experience was in the schema but never rendered, so an entry vanished from every PDF.
+    prof = _profile(_DB).model_copy(
+        update={
+            "experience": [
+                Experience(
+                    company="Apache SkyWalking",
+                    title="Open Source Contributor",
+                    start="Sep 2026",
+                    end="Present",
+                    bullets=["Bounded the Top-N merge (#1322, merged)."],
+                )
+            ]
+        }
+    )
+    tex = render.render_latex(prof, tailor_resume(prof, "database", backend=None))
+    assert "\\section{Experience}" in tex
+    assert "{Apache SkyWalking}{Sep 2026 -- Present}" in tex
+    assert "(\\#1322, merged)" in tex  # escaped
+    assert tex.index("\\section{Experience}") < tex.index("\\section{Projects}")
+
+
+def test_render_latex_omits_experience_when_empty() -> None:
+    prof = _profile(_DB)
+    assert "\\section{Experience}" not in render.render_latex(prof, tailor_resume(prof, "db"))
+
+
 def test_render_latex_escapes_special_chars() -> None:
     proj = Project(name="R&D Tool", tech=["C#"], tags=["x"], bullets=["Saved 50% cost."])
     prof = _profile(proj)
@@ -161,6 +290,115 @@ def test_compile_pdf_without_engine_raises(monkeypatch: pytest.MonkeyPatch, tmp_
         render.compile_pdf(
             r"\documentclass{article}\begin{document}x\end{document}", tmp_path / "x.pdf"
         )
+
+
+# ── needs, evidence-based selection and tailored skills ────────────────────────────────────
+
+
+def test_prompt_sends_projects_strongest_first_not_keyword_first() -> None:
+    # The JD matches WALterDB's keywords, but the profile lists Portfolio first: the model must
+    # see profile order, because profile order is the strength signal.
+    fake = FakeBackend("### Portfolio\nShipped a personal website spanning 3 pages.\n")
+    tailor_resume(_profile(_WEB, _DB), "database systems c++", backend=fake, config=ResumeConfig())
+    assert fake.user.index("### Portfolio") < fake.user.index("### WALterDB")
+    assert "CANDIDATE SKILLS:\nLanguages: Go, Python, C++" in fake.user
+
+
+def test_llm_reply_with_needs_and_skills_sections() -> None:
+    fake = FakeBackend(
+        "### NEEDS\n"
+        "- keep a database correct under concurrency\n"
+        "### WALterDB\n"
+        "Built a DB engine in C++20 with 91 tests.\n"
+        "### SKILLS\n"
+        "Languages: C++, Python\n"
+    )
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database", backend=fake, config=ResumeConfig(max_projects=1)
+    )
+    assert res.needs == ["keep a database correct under concurrency"]
+    assert [p.name for p in res.projects] == ["WALterDB"]  # NEEDS took no project slot
+    assert res.skills == [SkillGroup(category="Languages", items=["C++", "Python"])]
+    assert res.flags == []
+
+
+def test_an_invented_header_takes_no_project_slot() -> None:
+    fake = FakeBackend(
+        "### Nonexistent Project\nSome made-up work.\n"
+        "### WALterDB\nBuilt a C++20 DB engine — 7K LOC, 91 tests.\n"
+    )
+    res = tailor_resume(
+        _profile(_DB, _WEB), "database", backend=fake, config=ResumeConfig(max_projects=1)
+    )
+    assert [p.name for p in res.projects] == ["WALterDB"]
+
+
+def test_missing_skills_section_falls_back_to_keyword_skills() -> None:
+    fake = FakeBackend("### WALterDB\nBuilt a C++20 DB engine — 7K LOC, 91 tests.\n")
+    res = tailor_resume(
+        _profile(_DB), "python role", backend=fake, config=ResumeConfig(max_projects=1)
+    )
+    assert res.skills == [SkillGroup(category="Languages", items=["Python"])]
+    assert any("no usable skills row" in f for f in res.flags)
+
+
+def test_guard_skills_keeps_profile_items_only() -> None:
+    skills = [
+        SkillGroup(category="Languages", items=["Go", "Python"]),
+        SkillGroup(
+            category="Databases",
+            items=["PostgreSQL/PostGIS", "Database internals (B+tree, LSM, WAL/ARIES)"],
+        ),
+    ]
+    groups, flags = _guard_skills(
+        [
+            "**Languages**: go, Rust",  # case fixed to the profile spelling, Rust dropped
+            "Cloud: AWS",  # a category the profile does not have
+            "Databases: PostGIS, Database internals (B+tree, LSM, WAL/ARIES)",
+        ],
+        skills,
+    )
+    assert groups == [
+        SkillGroup(category="Languages", items=["Go"]),
+        SkillGroup(
+            category="Databases",
+            items=["PostGIS", "Database internals (B+tree, LSM, WAL/ARIES)"],
+        ),
+    ]
+    assert len(flags) == 1 and "Rust" in flags[0] and "Cloud: AWS" in flags[0]
+
+
+def test_guard_skills_rejects_an_item_under_the_wrong_category() -> None:
+    skills = [
+        SkillGroup(category="Languages", items=["Python"]),
+        SkillGroup(category="Databases", items=["Redis"]),
+    ]
+    groups, flags = _guard_skills(["Languages: Redis, Python"], skills)
+    assert groups == [SkillGroup(category="Languages", items=["Python"])]
+    assert "Redis" in flags[0]
+
+
+def test_guard_skills_caps_rows_and_items() -> None:
+    skills = [
+        SkillGroup(category=f"C{n}", items=[f"S{n}-{i}" for i in range(12)]) for n in range(6)
+    ]
+    lines = [f"C{n}: " + ", ".join(f"S{n}-{i}" for i in range(12)) for n in range(6)]
+    groups, _ = _guard_skills(lines, skills)
+    assert len(groups) == 4 and all(len(g.items) == 8 for g in groups)
+
+
+def test_select_skills_keeps_only_items_the_job_names() -> None:
+    skills = [
+        SkillGroup(category="Languages", items=["Go", "Python", "C++"]),
+        SkillGroup(category="Databases", items=["PostgreSQL", "Redis"]),
+        SkillGroup(category="ML", items=["PyTorch"]),
+    ]
+    picked = select_skills(skills, {"postgresql", "python"})
+    assert picked == [
+        SkillGroup(category="Languages", items=["Python"]),
+        SkillGroup(category="Databases", items=["PostgreSQL"]),
+    ]
+    assert select_skills(skills, {"nothing"}) == skills  # no match: keep every group
 
 
 # ── LLM selection + rewrite (one call, the model chooses AND words the projects) ─────────
@@ -311,3 +549,63 @@ def test_find_resume_returns_the_newest_and_none_when_absent(monkeypatch, tmp_pa
     newest = paths.find_resume("Acme", "Backend Engineer")
     assert newest is not None and newest.name.endswith("2026-09-15.pdf")
     assert paths.find_resume("Other Co", "Backend Engineer") is None  # scoped per company
+
+
+# ── one-page fitting ───────────────────────────────────────────────────────────────────────
+
+
+def _three_project_resume() -> tuple[Profile, TailoredResume]:
+    projects = [
+        Project(name=f"P{n}", bullets=[f"P{n} problem.", f"P{n} decision.", f"P{n} result."])
+        for n in range(1, 4)
+    ]
+    prof = _profile(*projects)
+    return prof, tailor_resume(prof, "p", backend=None, config=ResumeConfig(max_projects=3))
+
+
+def test_build_pdf_trims_the_last_project_until_one_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pages = iter([2, 2, 1])
+    monkeypatch.setattr(render, "_compile", lambda tex, out, engine: next(pages))
+    prof, tailored = _three_project_resume()
+    render.build_pdf(prof, tailored, tmp_path / "r.pdf")
+    # Pass 1: P3 loses its middle bullet. Pass 2: P3 goes. Pass 3: one page.
+    assert [p.name for p in tailored.projects] == ["P1", "P2"]
+    assert tailored.flags == [
+        "one page: dropped a middle bullet from P3",
+        "one page: dropped P3, the last-ranked project",
+    ]
+
+
+def test_build_pdf_keeps_two_projects_even_when_still_long(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = []
+    monkeypatch.setattr(render, "_compile", lambda tex, out, engine: calls.append(1) or 2)
+    prof, tailored = _three_project_resume()
+    render.build_pdf(prof, tailored, tmp_path / "r.pdf")
+    assert [p.name for p in tailored.projects] == ["P1", "P2"]
+    assert tailored.projects[1].bullets == ["P2 problem.", "P2 result."]
+    assert len(calls) == 4  # 3 trims, then a pass with nothing left to drop
+
+
+def test_build_pdf_does_not_trim_when_the_page_count_is_unknown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(render, "_compile", lambda tex, out, engine: None)  # e.g. tectonic
+    prof, tailored = _three_project_resume()
+    render.build_pdf(prof, tailored, tmp_path / "r.pdf")
+    assert len(tailored.projects) == 3 and tailored.flags == []
+
+
+def test_pages_regex_reads_the_pdflatex_log() -> None:
+    log = "...\nOutput written on resume.pdf (2 pages, 110515 bytes).\nTranscript written"
+    match = render._PAGES_RE.search(log)
+    assert match is not None and match.group(1) == "2"
+
+
+def test_render_latex_puts_the_grade_on_the_degree_line() -> None:
+    prof = _profile(_DB)
+    tex = render.render_latex(prof, tailor_resume(prof, "db"))
+    assert "{B.Sc. CS, CGPA: 9.0}" in tex

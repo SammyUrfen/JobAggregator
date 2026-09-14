@@ -21,7 +21,7 @@ from job_aggregator.apply.driver import ApplicationFields
 from job_aggregator.apply.session import load_state, save_state
 from job_aggregator.errors import AgentError, ConfigError
 from job_aggregator.paths import resume_path
-from job_aggregator.resume.render import compile_pdf, render_latex
+from job_aggregator.resume.render import build_pdf
 from job_aggregator.resume.tailor import tailor_resume
 
 log = logging.getLogger(__name__)
@@ -83,6 +83,10 @@ def build_background(profile: Profile) -> str:
     for edu in profile.education:
         grade = f", {edu.grade}" if edu.grade else ""
         lines.append(f"Education: {edu.degree}, {edu.institution}{grade}")
+    for exp in profile.experience:
+        dates = f" ({exp.start or ''} to {exp.end or ''})" if exp.start or exp.end else ""
+        lines.append(f"Experience: {exp.title}, {exp.company}{dates}")
+        lines.extend(f"    • {bullet}" for bullet in exp.bullets)
     if profile.skills:
         lines.append(
             "Skills — " + "; ".join(f"{g.category}: {', '.join(g.items)}" for g in profile.skills)
@@ -152,7 +156,7 @@ def apply_to_job(
         jd += f"\n\nAdditional context:\n{extra_context.strip()}"
     tailored = tailor_resume(profile, jd, backend=backend, config=cfg.resume)
     pdf = resume_path(job.company, job.title)
-    compile_pdf(render_latex(profile, tailored), pdf)  # RenderError propagates when no LaTeX engine
+    build_pdf(profile, tailored, pdf)  # one page. RenderError propagates when no LaTeX engine
 
     # 2. field map + deterministic ATS selectors (None -> the driver uses its generic path)
     fields = build_fields(profile, str(pdf), extra_context)

@@ -454,7 +454,7 @@ def test_tailor_route_returns_preview(
 
     example = load_profile(PROFILE_EXAMPLE_YAML)  # the committed placeholder validates
     monkeypatch.setattr(routes_jobs, "load_profile", lambda: example)
-    monkeypatch.setattr(routes_jobs, "compile_pdf", lambda tex, out: out)  # skip real LaTeX
+    monkeypatch.setattr(routes_jobs, "build_pdf", lambda profile, tailored, out: out)  # no LaTeX
     monkeypatch.setattr(routes_jobs, "_tailor_backend", lambda cfg: None)  # deterministic, no LLM
     monkeypatch.setenv("JOBAGG_DATA_DIR", str(tmp_path))
     r = client.post("/api/jobs/j1/tailor")
@@ -907,7 +907,7 @@ def test_tailor_folds_sent_context_into_jd(
     monkeypatch.setattr(routes_jobs, "tailor_resume", fake_tailor)
     monkeypatch.setattr(
         routes_jobs,
-        "compile_pdf",
+        "build_pdf",
         lambda *a, **k: (_ for _ in ()).throw(routes_jobs.RenderError("no engine")),
     )
     r = client.post("/api/jobs/j1/tailor", data={"extra_context": "SECRET-CONTEXT-XYZ"})

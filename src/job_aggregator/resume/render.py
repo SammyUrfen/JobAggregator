@@ -7,6 +7,7 @@ All dynamic text is LaTeX-escaped, so a stray & or % in a company name can't bre
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -17,13 +18,19 @@ from job_aggregator.errors import RenderError
 from job_aggregator.paths import default_resume_template
 
 if TYPE_CHECKING:
-    from job_aggregator.profile.schema import Contact, Education, Profile
+    from job_aggregator.profile.schema import Contact, Education, Experience, Profile
     from job_aggregator.resume.tailor import TailoredResume
 
 _DOC_START = r"\begin{document}"
 # LaTeX engines we can shell out to, in preference order (tectonic is self-contained).
 _ENGINES = ("tectonic", "pdflatex")
 _PDF_TIMEOUT_S = 120.0
+# pdflatex ends its log with "Output written on resume.pdf (2 pages, 110515 bytes)."
+_PAGES_RE = re.compile(r"Output written on .*?\((\d+) pages?")
+# A project needs 3 bullets before one can go from the middle and the story keeps both ends.
+_MIDDLE_BULLET_MIN = 3
+# Fitting stops here: two projects plus the Experience entry is the least that still shows range.
+_MIN_PROJECTS_WHEN_FITTING = 2
 
 # Order matters: backslash must be escaped first, so we iterate this list, not a dict.
 _LATEX_REPLACEMENTS = (
@@ -85,6 +92,29 @@ def _projects(tailored: TailoredResume) -> str:
     )
 
 
+def _experience(items: list[Experience]) -> str:
+    """Experience renders verbatim: the tailor never rewrites it, so its bullets must already be
+    résumé length in profile.yaml."""
+    if not items:
+        return ""
+    blocks: list[str] = []
+    for e in items:
+        dates = _esc(f"{e.start or ''} -- {e.end or ''}".strip(" -"))
+        name = _esc(e.company)
+        if e.url:
+            name = f"\\hrefplain{{{_esc(e.url)}}}{{{name}}}"
+        bullets = f"\n{_bullets(e.bullets)}" if e.bullets else ""
+        blocks.append(
+            f"  \\resumeSubheading\n    {{{name}}}{{{dates}}}\n"
+            f"    {{{_esc(e.title)}}}{{{_esc(e.location or '')}}}{bullets}"
+        )
+    return (
+        "\\section{Experience}\n\\resumeSubHeadingListStart\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n\\resumeSubHeadingListEnd"
+    )
+
+
 def _education(items: list[Education]) -> str:
     if not items:
         return ""
@@ -94,10 +124,13 @@ def _education(items: list[Education]) -> str:
         name = _esc(e.institution)
         if e.url:
             name = f"\\hrefplain{{{_esc(e.url)}}}{{{name}}}"
-        grade = f"\n{_bullets([e.grade])}" if e.grade else ""
+        # The grade rides on the degree line. As its own one-item list it cost two printed lines
+        # for each institution, and those lines pushed the skills section onto a second page.
+        # A comma, not "|": in LaTeX's default font encoding a bare "|" prints as a dash.
+        degree = f"{e.degree}, {e.grade}" if e.grade else e.degree
         blocks.append(
             f"  \\resumeEduHeading\n    {{{name}}}{{{dates}}}\n"
-            f"    {{{_esc(e.degree)}}}{{{_esc(e.location or '')}}}{grade}"
+            f"    {{{_esc(degree)}}}{{{_esc(e.location or '')}}}"
         )
     return (
         "\\section{Education}\n\\resumeSubHeadingListStart\n\n"
@@ -142,6 +175,7 @@ def render_latex(
     preamble = template.split(_DOC_START, 1)[0]
     sections = [
         _header(profile.contact),
+        _experience(profile.experience),
         _projects(tailored),
         _education(profile.education),
         _skills(tailored),
@@ -158,6 +192,49 @@ def _find_engine() -> str | None:
 def compile_pdf(tex: str, out_pdf: Path, *, engine: str | None = None) -> Path:
     """Compile a .tex string to `out_pdf`. Raises RenderError if no engine is installed or the
     build fails. Kept behind this seam so the rest of the pipeline is testable without LaTeX."""
+    _compile(tex, out_pdf, engine)
+    return out_pdf
+
+
+def build_pdf(
+    profile: Profile, tailored: TailoredResume, out_pdf: Path, *, engine: str | None = None
+) -> Path:
+    """Render + compile the résumé, trimming it until it fits ONE page.
+
+    Each pass over a page drops the least important content the model ranked: first the middle
+    bullet of the last project (the story keeps its problem and its result), then the whole last
+    project, never below `_MIN_PROJECTS_WHEN_FITTING`. It MUTATES `tailored` (projects + a flag
+    per trim), so the preview shows exactly what the PDF holds.
+
+    ponytail: the page count comes from the engine log. pdflatex prints it, and tectonic does not,
+    so under tectonic the PDF is built once, untrimmed. Read the PDF itself if tectonic becomes
+    the engine here.
+    """
+    while True:
+        pages = _compile(render_latex(profile, tailored), out_pdf, engine)
+        if pages is None or pages <= 1 or not _trim_for_one_page(tailored):
+            return out_pdf
+
+
+def _trim_for_one_page(tailored: TailoredResume) -> bool:
+    """Drop one step of content from the end of the résumé. False when nothing more may go."""
+    if not tailored.projects:
+        return False
+    last = tailored.projects[-1]
+    if len(last.bullets) >= _MIDDLE_BULLET_MIN:
+        bullets = [last.bullets[0], *last.bullets[2:]]
+        tailored.projects[-1] = last.model_copy(update={"bullets": bullets})
+        tailored.flags.append(f"one page: dropped a middle bullet from {last.name}")
+        return True
+    if len(tailored.projects) > _MIN_PROJECTS_WHEN_FITTING:
+        tailored.projects.pop()
+        tailored.flags.append(f"one page: dropped {last.name}, the last-ranked project")
+        return True
+    return False
+
+
+def _compile(tex: str, out_pdf: Path, engine: str | None) -> int | None:
+    """Build the PDF. Returns the page count from the engine log, or None if the log has none."""
     chosen = engine or _find_engine()
     if chosen is None:
         raise RenderError(
@@ -183,4 +260,5 @@ def compile_pdf(tex: str, out_pdf: Path, *, engine: str | None = None) -> Path:
             )
         out_pdf.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(produced, out_pdf)
-    return out_pdf
+    match = _PAGES_RE.search(proc.stdout + proc.stderr)
+    return int(match.group(1)) if match else None

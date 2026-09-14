@@ -16,6 +16,7 @@ Design:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import time
@@ -68,10 +69,8 @@ def live_pids(*, path: Path | None = None) -> list[int]:
     Prunes the file to just those (dead/finished runs drop out)."""
     p = path or _pids_file()
     live = [pid for pid in dict.fromkeys(_read_pids(p)) if _is_apply_proc(pid)]
-    try:
+    with contextlib.suppress(OSError):
         p.write_text("".join(f"{pid}\n" for pid in live), encoding="utf-8")
-    except OSError:
-        pass
     return live
 
 
@@ -81,10 +80,8 @@ def _signal_group(pid: int, sig: int) -> None:
     try:
         os.killpg(os.getpgid(pid), sig)
     except (OSError, ProcessLookupError):
-        try:
+        with contextlib.suppress(OSError):
             os.kill(pid, sig)
-        except OSError:
-            pass
 
 
 def stop_all(
@@ -101,8 +98,6 @@ def stop_all(
     for pid in pids:
         if _is_apply_proc(pid):  # ignored the TERM (stuck in a syscall) -> hard kill the group
             _signal_group(pid, signal.SIGKILL)
-    try:
+    with contextlib.suppress(OSError):
         p.write_text("", encoding="utf-8")
-    except OSError:
-        pass
     return len(pids)
