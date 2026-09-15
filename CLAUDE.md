@@ -280,6 +280,14 @@ model saw projects in keyword order with no strength signal.
 - CLI `tailor` now reads `full_description` (the Internshala slug was its whole JD before).
 - The six old lint errors (`procs.py` SIM105, `routes_jobs.py` lazy imports + `sqlite3.Row.keys()`)
   are fixed or carry a reasoned `noqa`, so `ruff check .` is green again.
+- **Tailor any pasted posting (home screen):** a collapsed "Tailor a résumé to any posting" panel
+  on `/` takes company, title and the pasted JD, and posts to `POST /api/tailor` (no job row, for
+  boards the aggregator does not fetch, such as Wellfound). The PDF is served by
+  `GET /api/resumes/{name}`, which accepts only the exact `resume_path` file-name shape. The prompt
+  also gained two rules from a live run: name only needs a résumé line can prove (not "comfortable
+  with ambiguity"), and write without "I". Verified in real Chromium on a throwaway :8791 instance
+  (collapsed/open, light/dark, phone width, required-field block, submit, 1-page PDF, 0 console
+  errors).
 - Live: that internship posting 1 page with 4 projects, a Java backend posting 1 page after dropping its 4th
   project, an AI Engineer posting 1 page after one bullet. The model's picks vary between runs.
 

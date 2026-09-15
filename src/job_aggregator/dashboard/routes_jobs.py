@@ -41,7 +41,13 @@ from job_aggregator.dashboard.deps import (
     header_context,
 )
 from job_aggregator.errors import NotFoundError, RenderError
-from job_aggregator.paths import data_dir, default_db_path, find_resume, resume_path
+from job_aggregator.paths import (
+    data_dir,
+    default_db_path,
+    find_resume,
+    resume_path,
+    resumes_dir,
+)
 from job_aggregator.profile.store import load_profile
 from job_aggregator.resume.render import build_pdf
 from job_aggregator.resume.tailor import tailor_resume
@@ -572,6 +578,55 @@ def job_resume_pdf(uid: str, conn: sqlite3.Connection = Depends(get_conn)) -> Fi
     if path is None:
         raise NotFoundError("no tailored résumé for this job yet", details={"uid": uid})
     return FileResponse(path, media_type="application/pdf", filename=path.name)
+
+
+# A pasted posting longer than this is not a job description. After flattening, the JD text is
+# also capped at MAX_DESC_CHARS like every stored description.
+_MAX_PASTED_JD_CHARS = 50_000
+_MAX_PASTED_NAME_CHARS = 200
+# The only file names the standalone PDF route serves: exactly the shape `resume_path` writes.
+# No "/" and no "..", so a request can never leave the résumés folder.
+_RESUME_NAME_RE = re.compile(r"^[a-z0-9-]+_[a-z0-9-]+_\d{4}-\d{2}-\d{2}\.pdf$")
+
+
+@router.post("/api/tailor", response_class=HTMLResponse)
+def tailor_pasted_posting(
+    request: Request,
+    description: Annotated[str, Form(max_length=_MAX_PASTED_JD_CHARS, pattern=r"\S")],
+    company: Annotated[str, Form(max_length=_MAX_PASTED_NAME_CHARS)] = "",
+    title: Annotated[str, Form(max_length=_MAX_PASTED_NAME_CHARS)] = "",
+    cfg: Config = Depends(get_config),
+    templates: Jinja2Templates = Depends(get_templates),
+) -> HTMLResponse:
+    """Tailor the résumé to a posting pasted on the home screen, with no job row behind it: a
+    posting from a board the aggregator does not fetch (Wellfound, a referral, an email)."""
+    profile = load_profile()  # ConfigError -> 422 friendly ("copy the example profile")
+    title = title.strip() or "role"
+    jd = f"{title}\n{html_to_text(description)}"
+    tailored = tailor_resume(profile, jd, backend=_tailor_backend(cfg), config=cfg.resume)
+    pdf = resume_path(company.strip() or "company", title)
+    pdf_ready = False
+    try:
+        # Trims `tailored` to one page in place, so the preview below matches the PDF.
+        build_pdf(profile, tailored, pdf)
+        pdf_ready = True
+    except RenderError:
+        log.warning("résumé PDF not built for a pasted posting; preview only")
+    context = {
+        "tailored": tailored,
+        "pdf_ready": pdf_ready,
+        "pdf_url": f"/api/resumes/{pdf.name}" if pdf_ready else None,
+    }
+    return templates.TemplateResponse(request, "partials/resume_preview.html", context)
+
+
+@router.get("/api/resumes/{name}")
+def resume_file(name: str) -> FileResponse:
+    """Serve a tailored PDF by its file name, for a résumé with no job row behind it."""
+    path = resumes_dir() / name
+    if not _RESUME_NAME_RE.match(name) or not path.is_file():
+        raise NotFoundError("résumé not found", details={"name": name})
+    return FileResponse(path, media_type="application/pdf", filename=name)
 
 
 # How long to watch the spawned apply process for an instant death before reporting success.

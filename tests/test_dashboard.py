@@ -484,6 +484,63 @@ def test_tailor_backend_seam_is_config_driven(monkeypatch: pytest.MonkeyPatch) -
     assert _tailor_backend(Config()) is None
 
 
+def test_home_has_the_tailor_any_posting_form(client: TestClient) -> None:
+    r = client.get("/")
+    assert 'id="tailor-any-form"' in r.text and 'name="description"' in r.text
+
+
+def test_tailor_pasted_posting_returns_preview_and_names_the_pdf(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from job_aggregator.dashboard import routes_jobs
+    from job_aggregator.paths import PROFILE_EXAMPLE_YAML
+    from job_aggregator.profile.store import load_profile
+
+    example = load_profile(PROFILE_EXAMPLE_YAML)
+    seen: dict[str, str] = {}
+
+    def fake_build(profile: object, tailored: object, out: Path) -> Path:
+        seen["out"] = out.name
+        return out
+
+    monkeypatch.setattr(routes_jobs, "load_profile", lambda: example)
+    monkeypatch.setattr(routes_jobs, "build_pdf", fake_build)
+    monkeypatch.setattr(routes_jobs, "_tailor_backend", lambda cfg: None)
+    monkeypatch.setenv("JOBAGG_DATA_DIR", str(tmp_path))
+    r = client.post(
+        "/api/tailor",
+        data={
+            "company": "Chopsticks AI",
+            "title": "Software Development Intern",
+            "description": "Build Next.js screens and Node.js APIs.",
+        },
+    )
+    assert r.status_code == 200
+    assert "preservation" in r.text
+    assert seen["out"].startswith("chopsticks-ai_software-development-intern_")
+    assert f"/api/resumes/{seen['out']}" in r.text  # the link serves exactly the built file
+
+
+def test_tailor_pasted_posting_rejects_a_blank_description(client: TestClient) -> None:
+    r = client.post("/api/tailor", data={"company": "X", "description": "   \n "})
+    assert r.status_code == 422
+
+
+def test_resume_file_serves_only_resume_shaped_names(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("JOBAGG_DATA_DIR", str(tmp_path))
+    resumes = tmp_path / "resumes"
+    resumes.mkdir()
+    (resumes / "acme_intern_2026-09-15.pdf").write_bytes(b"%PDF-1.5 test")
+    (tmp_path / "secret_file_2026-09-15.pdf").write_bytes(b"%PDF-1.5 outside")
+    ok = client.get("/api/resumes/acme_intern_2026-09-15.pdf")
+    assert ok.status_code == 200 and ok.headers["content-type"] == "application/pdf"
+    assert client.get("/api/resumes/missing_intern_2026-09-15.pdf").status_code == 404
+    assert client.get("/api/resumes/notes.txt").status_code == 404  # wrong shape
+    assert client.get("/api/resumes/..%2Fsecret_file_2026-09-15.pdf").status_code == 404
+
+
 def test_tailor_route_unknown_uid_404(client: TestClient) -> None:
     r = client.post("/api/jobs/nope/tailor")  # row is None -> 404 before load_profile
     assert r.status_code == 404

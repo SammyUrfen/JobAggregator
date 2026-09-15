@@ -364,6 +364,39 @@
     });
   }
 
+  // ---- 9) tailor to any pasted posting (home screen, no job row) -----------------------
+  const tailorAnyForm = document.getElementById("tailor-any-form");
+  if (tailorAnyForm) {
+    tailorAnyForm.addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      const btn = document.getElementById("tailor-any-btn");
+      const out = document.getElementById("tailor-any-result");
+      btn.disabled = true;
+      btn.textContent = "Tailoring…";
+      out.innerHTML = '<p class="muted">Claude is reading the posting, choosing projects and skills, ' +
+        "and fitting the résumé to one page. This takes 1 to 2 minutes.</p>";
+      try {
+        const res = await fetch("/api/tailor", {
+          method: "POST", headers: { Accept: "text/html" }, body: new FormData(tailorAnyForm),
+        });
+        if (res.ok) {
+          out.innerHTML = await res.text();
+        } else {
+          let msg = "Tailoring failed.";
+          try { msg = (await res.json()).error.message; } catch (_) {}
+          out.innerHTML = "";
+          alert(msg);
+        }
+      } catch (e) {
+        out.innerHTML = "";
+        alert("Tailoring failed.");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Tailor résumé";
+      }
+    });
+  }
+
   // ---- 7) profile editor: PUT the YAML, surface validation errors in the banner ----------
   const profileForm = document.getElementById("profile-form");
   if (profileForm) {

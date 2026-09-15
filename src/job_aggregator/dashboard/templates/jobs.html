@@ -1,6 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Jobs · JobAggregator{% endblock %}
 {% block content %}
+{#- Tailor to any posting: a job from a board the aggregator does not fetch (Wellfound, a referral).
+    No job row is created. app.js posts the form to /api/tailor and injects the preview. -#}
+<details class="card tailor-any">
+  <summary>Tailor a résumé to any posting</summary>
+  <form id="tailor-any-form" class="tailor-any-form">
+    <div class="tailor-any-names">
+      <div class="field">
+        <label for="tailor-any-company">Company</label>
+        <input id="tailor-any-company" name="company" maxlength="200" placeholder="e.g. Chopsticks AI">
+      </div>
+      <div class="field">
+        <label for="tailor-any-title">Job title</label>
+        <input id="tailor-any-title" name="title" maxlength="200" placeholder="e.g. Software Development Intern">
+      </div>
+    </div>
+    <div class="field">
+      <label for="tailor-any-description">Job description</label>
+      <textarea id="tailor-any-description" name="description" rows="8" required
+                placeholder="Paste the whole posting: responsibilities, requirements, skills."></textarea>
+    </div>
+    <button class="btn" type="submit" id="tailor-any-btn">Tailor résumé</button>
+    <span class="muted tailor-any-note">The PDF is named for the company and title, and fits one page.</span>
+  </form>
+  <div id="tailor-any-result"></div>
+</details>
+
 <form class="filters card" method="get" action="/">
   <input type="search" name="q" placeholder="Search title / company" value="{{ query.q or '' }}">
   <select name="source" aria-label="Source">

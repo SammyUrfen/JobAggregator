@@ -274,6 +274,13 @@ body.modal-open { overflow: hidden; } /* freeze the page behind the modal */
 .jd-context-actions { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
 .jd-context-status { font-size: 11px; }
 .btn-sm { padding: 3px 8px; font-size: 11px; }
+/* tailor to any pasted posting (home screen) */
+.tailor-any { margin-bottom: var(--sp-4); }
+.tailor-any summary { cursor: pointer; font-weight: var(--fw-emph); }
+.tailor-any-form { margin-top: var(--sp-3); }
+.tailor-any-names { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.tailor-any-note { font-size: 11px; margin-left: var(--sp-2); }
+@media (max-width: 640px) { .tailor-any-names { grid-template-columns: 1fr; } }
 .tailor-result { background: var(--surface-2); border-radius: var(--radius-inner);
   padding: var(--sp-3); margin-top: var(--sp-2); font-size: 13px; }
 .tailor-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);
