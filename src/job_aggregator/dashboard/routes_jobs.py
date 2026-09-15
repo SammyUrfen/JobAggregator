@@ -20,6 +20,7 @@ import sqlite3
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -40,7 +41,7 @@ from job_aggregator.dashboard.deps import (
     get_templates,
     header_context,
 )
-from job_aggregator.errors import NotFoundError, RenderError
+from job_aggregator.errors import NotFoundError, RenderError, SourceError
 from job_aggregator.paths import (
     data_dir,
     default_db_path,
@@ -51,11 +52,13 @@ from job_aggregator.paths import (
 from job_aggregator.profile.store import load_profile
 from job_aggregator.resume.render import build_pdf
 from job_aggregator.resume.tailor import tailor_resume
+from job_aggregator.sources._http import get_text, make_client
 from job_aggregator.storage import jobs_repo
 
 if TYPE_CHECKING:
     from job_aggregator.apply.backends import AgentBackend
     from job_aggregator.config.schema import Config
+    from job_aggregator.sources.closure import ClosureVerdict
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -334,7 +337,14 @@ def _build_where(query: JobQuery) -> tuple[str, list[Any]]:
         clauses.append("salary_bucket = ?")
         params.append(query.bucket)
     if query.status is None:
-        clauses.append("status != 'deleted'")  # default view hides soft-deleted
+        # Default view hides soft-deleted rows, and stale ones unless hidden rows are shown: a
+        # stale row left an exhaustive source's open-only list (2026-09-15 audit: 7 of 8 checked
+        # stale Unstop rows were closed). An applied or bookmarked stale row stays listed.
+        clauses.append(
+            "status != 'deleted'"
+            if query.show_hidden
+            else "status != 'deleted' AND (status != 'stale' OR applied = 1 OR bookmarked = 1)"
+        )
     elif query.status != "all":
         clauses.append("status = ?")
         params.append(query.status)
@@ -402,25 +412,52 @@ def index(
 _PREVIEW_DESC_SOURCES = frozenset({"adzuna", "jooble"})
 
 
-def effective_description(conn: sqlite3.Connection, row: sqlite3.Row) -> str | None:
+def _fetch_internshala_page(url: str) -> str | None:
+    """One Internshala detail page, or None on any fetch failure (the modal then keeps the slug).
+    Human-triggered, one page per open, never in the daily run."""
+    try:
+        with make_client() as client:
+            return get_text(client, url)
+    except SourceError as exc:
+        log.info("internshala detail fetch failed for %s: %s", url, exc)
+        return None
+
+
+def effective_description(
+    conn: sqlite3.Connection, row: sqlite3.Row
+) -> tuple[str | None, ClosureVerdict | None]:
     """The best description for a job: a previously-cached `full_description`, else — for an
     Internshala job whose listing only stored the category slug — fetch the real JD on demand
     and cache it (survives re-fetch), else the stored `description`. Best-effort: a failed fetch
-    falls back to the slug, never an error."""
+    falls back to the slug, never an error.
+
+    Also returns the closed state read from that same Internshala page, so an open costs one
+    request, not two: "unknown" when the fetch failed, None when no page was fetched."""
     keys = row.keys()
     full = row["full_description"] if "full_description" in keys else None
-    if full:
-        return str(full)
-    if row["source"] == "internshala":
-        # Lazy: bs4 loads only when a user opens an Internshala job.
-        from job_aggregator.sources.internshala import fetch_detail_description  # noqa: PLC0415
+    stored: str | None = str(full) if full else row["description"]
+    if full or row["source"] != "internshala":
+        return stored, None
+    # Lazy: bs4 loads only when a user opens an Internshala job.
+    from job_aggregator.sources.closure import internshala_verdict  # noqa: PLC0415
+    from job_aggregator.sources.internshala import (  # noqa: PLC0415
+        _is_internshala_detail_url,
+        parse_detail_description,
+    )
 
-        fetched = fetch_detail_description(row["url"])
-        if fetched:
-            jobs_repo.set_user_flag(conn, row["job_uid"], "full_description", fetched)
-            return fetched
-    desc: str | None = row["description"]
-    return desc
+    url = row["url"]
+    page = _fetch_internshala_page(url) if _is_internshala_detail_url(url) else None
+    if page is None:
+        return stored, "unknown"
+    fetched = parse_detail_description(page)
+    if fetched:
+        jobs_repo.set_user_flag(conn, row["job_uid"], "full_description", fetched)
+    return fetched or stored, internshala_verdict(page)
+
+
+# Opening a posting re-checks its closed state when the last check is older than this. A day
+# keeps the answer fresh for a posting he is about to apply to, and a re-open costs no request.
+_OPEN_RECHECK = timedelta(days=1)
 
 
 @router.get("/api/jobs/{uid}/detail", response_class=HTMLResponse)
@@ -432,13 +469,29 @@ def job_detail(
     templates: Jinja2Templates = Depends(get_templates),
 ) -> HTMLResponse:
     """Detail-modal body for one job: facts + a safe-rendered description + the original link.
-    Internshala descriptions are enriched on first open (the listing only has the slug)."""
+    Internshala descriptions are enriched on first open (the listing only has the slug). A
+    posting from a closure-checkable source is checked against its original page at most once a
+    day, and a closed one is soft-deleted (sources/closure.py) and shown with a banner."""
     row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
     if row is None:
         raise NotFoundError("job not found", details={"uid": uid})
+    # Lazy: closure imports the Internshala adapter (bs4), needed only when a job is opened.
+    from job_aggregator.sources import closure  # noqa: PLC0415
+
+    description, verdict = effective_description(conn, row)
+    now: datetime = request.app.state.clock.now()
+    checked = row["closure_checked_at"]
+    due = checked is None or datetime.fromisoformat(checked) < now - _OPEN_RECHECK
+    if verdict is None and due and row["source"] in closure.CHECKABLE_SOURCES:
+        verdict = closure.check_posting(row["source"], row["url"], row["source_native_id"])
+    if verdict is not None:
+        closure.record_verdict(conn, uid, verdict, now)
+    if verdict == "closed":  # re-read: the soft-delete changed the status badge
+        row = conn.execute("SELECT * FROM jobs WHERE job_uid = ?", (uid,)).fetchone()
     context = {
         "job": row,
-        "description_html": render_description_html(effective_description(conn, row)),
+        "applications_closed": verdict == "closed",
+        "description_html": render_description_html(description),
         # Adzuna/Jooble APIs return a truncated preview — tell the user the full text is on the
         # posting (only when we don't have a fuller cached description).
         "description_is_preview": row["source"] in _PREVIEW_DESC_SOURCES

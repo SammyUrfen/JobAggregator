@@ -56,6 +56,7 @@ class ConfigForm(BaseModel):
     hours_old: int | None = None
     grace_days: int | None = None
     catch_up_on_startup: bool | None = None
+    closure_checks_per_run: int | None = None
 
     salary_min_remote: int | None = None
     salary_min_in_office: int | None = None
@@ -72,6 +73,7 @@ class ConfigForm(BaseModel):
     keywords_exclude: str | None = None
     keywords_intern_queries: str | None = None
     max_experience_years: int | None = None
+    max_internship_months: int | None = None
     locations: str | None = None
 
     notify_telegram_enabled: bool | None = None
@@ -137,6 +139,8 @@ def _apply_keywords(merged: dict[str, Any], f: ConfigForm) -> None:
         kw["intern_queries"] = _split(f.keywords_intern_queries)
     if f.max_experience_years is not None:
         kw["max_experience_years"] = f.max_experience_years
+    if f.max_internship_months is not None:
+        kw["max_internship_months"] = f.max_internship_months
     if f.locations is not None:
         merged["locations"] = _split(f.locations)
 
@@ -168,6 +172,7 @@ def _apply_form(current: dict[str, Any], f: ConfigForm) -> dict[str, Any]:
             (f.hours_old, "hours_old"),
             (f.grace_days, "grace_days"),
             (f.catch_up_on_startup, "catch_up_on_startup"),
+            (f.closure_checks_per_run, "closure_checks_per_run"),
         ),
     )
     _overlay(

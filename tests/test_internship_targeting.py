@@ -188,13 +188,13 @@ def test_out_of_level_and_off_stack_titles_excluded(
 
 
 def test_internship_stipend_below_remote_floor_passes(make_job: JobFactory, cfg: Config) -> None:
-    # ₹8k/month stipend: FAIL for a remote full-time job (floor 30k) but fine for an intern.
+    # ₹15k/month: FAIL for a remote full-time job (floor 30k), PASS for an intern (floor 12k).
     intern = make_job(
         title="SDE Intern",
         is_remote=True,
         is_internship=True,
-        salary_min=8000,
-        salary_max=8000,
+        salary_min=15000,
+        salary_max=15000,
         salary_currency="INR",
         salary_period="month",
         salary_parsed=True,

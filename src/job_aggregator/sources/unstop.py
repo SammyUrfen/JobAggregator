@@ -7,12 +7,14 @@ India internships/jobs. Loops the configured opportunity kinds and filters on `u
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from job_aggregator.errors import SourceError
-from job_aggregator.sources._http import get_json, make_client, paginate_until_empty
+from job_aggregator.pipeline.signals import remote_flag, work_mode
+from job_aggregator.sources._http import get_json, make_client
 from job_aggregator.sources.base import (
     RawPosting,
     Source,
@@ -31,10 +33,34 @@ _URL = "https://unstop.com/api/public/opportunity/search-result"
 _PER_PAGE = 30
 # Unstop currency icon tokens -> ISO currency.
 _UNSTOP_CCY = {"fa-rupee": "INR", "fa-inr": "INR", "fa-dollar": "USD", "fa-usd": "USD"}
-# Unstop pay_in tokens -> our normalized period.
-_UNSTOP_PERIOD = {"month": "month", "year": "year", "week": "week", "hour": "hour"}
+# Unstop pay_in tokens -> our normalized period. The live API sends "monthly" and "annually"
+# (54 + 48 of 102 items, audit 2026-09-15). Only the short keys were mapped, so salary_period
+# stayed None on every row and no pay floor ever ran. The short keys stay for older payloads.
+_UNSTOP_PERIOD = {
+    "month": "month",
+    "monthly": "month",
+    "year": "year",
+    "annually": "year",
+    "week": "week",
+    "hour": "hour",
+}
+# jobDetail.type -> Job.is_remote. WHY not `region`: region is "online" on 102 of 102 items (it
+# describes the application, not the work), so every row used to be stored as remote.
+_UNSTOP_REMOTE = {"wfh": True, "in_office": False, "hybrid": False}
+# Unstop is an India platform: every one of the 102 audited location entries says India. Used
+# only when a location entry leaves the country out, so the location gate still matches.
+_DEFAULT_COUNTRY = "India"
 # public_url is a scheme-less relative path (e.g. 'internships/<slug>-<id>'); seo_url is absolute.
 _UNSTOP_BASE = "https://unstop.com"
+
+
+def _names(value: Any) -> list[str]:
+    """Names from a list of {name: ...} dicts or strings. A lone dict or string counts as a list
+    of one. WHY: workfunction arrives as a LIST of dicts, and the old dict-only read put a raw
+    Python repr ("Function: [{'id': 2004, ...") into the description."""
+    entries = value if isinstance(value, list) else [value]
+    names = [str(e.get("name", "") if isinstance(e, dict) else e or "").strip() for e in entries]
+    return [n for n in names if n]
 
 
 def _description(item: Any) -> str | None:
@@ -46,17 +72,39 @@ def _description(item: Any) -> str | None:
     details = item.get("details")
     if isinstance(details, str) and details.strip():
         parts.append(details.strip())
-    skills = item.get("required_skills")
-    if isinstance(skills, list) and skills:
-        names = [str(s.get("name", "") if isinstance(s, dict) else s or "").strip() for s in skills]
-        names = [n for n in names if n]
-        if names:
-            parts.append("Skills: " + ", ".join(names))
-    wf = item.get("workfunction")
-    wf_name = str(wf.get("name", "") if isinstance(wf, dict) else wf or "").strip()
-    if wf_name:
-        parts.append(f"Function: {wf_name}")
+    if skills := _names(item.get("required_skills")):
+        parts.append("Skills: " + ", ".join(skills))
+    if functions := _names(item.get("workfunction")):
+        parts.append("Function: " + ", ".join(functions))
     return "\n".join(parts) or None
+
+
+def _location(item: Any) -> str | None:
+    """The stated cities plus their country ("Bangalore, Mumbai, India"), "India" for a pan-India
+    posting, else None.
+
+    WHY never a bare city: the location gate matches whole tokens against the configured list
+    ("Bengaluru, India", "India", ...). A bare "Pune" matches nothing, so the row would drop as
+    location_mismatch (21 extra drops in the audit replay).
+    """
+    entries = [e for e in item.get("locations") or [] if isinstance(e, dict)]
+    cities = list(dict.fromkeys(str(e["city"]).strip() for e in entries if e.get("city")))
+    if cities:
+        countries = dict.fromkeys(str(e.get("country") or _DEFAULT_COUNTRY) for e in entries)
+        return ", ".join([*cities, *countries])
+    regn = item.get("regnRequirements") or {}
+    if isinstance(regn, dict) and regn.get("work_location_type") == "pan_india":
+        return _DEFAULT_COUNTRY
+    return None
+
+
+def _is_remote(item: Any, detail: dict[str, Any]) -> bool | None:
+    """Remote only when Unstop says so: jobDetail.type first, else what the JD text states."""
+    mode = detail.get("type")
+    if mode in _UNSTOP_REMOTE:
+        return _UNSTOP_REMOTE[mode]
+    details = item.get("details")
+    return remote_flag(work_mode(details if isinstance(details, str) else None))
 
 
 def _opportunity_url(item: Any) -> str:
@@ -105,7 +153,8 @@ class UnstopSource(Source):
         exhausted = True
         with make_client() as client:
 
-            def fetch_page(page: int, opp: str, term: str | None) -> list[Any]:
+            def fetch_page(page: int, opp: str, term: str | None) -> tuple[list[Any], bool]:
+                """One search page: (items, is_last_page)."""
                 params: dict[str, Any] = {
                     "opportunity": opp,
                     "per_page": _PER_PAGE,
@@ -125,8 +174,15 @@ class UnstopSource(Source):
                 if term:
                     params["searchTerm"] = term
                 data = get_json(client, _URL, params=params)
-                inner = ((data.get("data") or {}).get("data")) if isinstance(data, dict) else None
-                return inner if isinstance(inner, list) else []
+                body = data.get("data") if isinstance(data, dict) else None
+                body = body if isinstance(body, dict) else {}
+                inner = body.get("data")
+                items = inner if isinstance(inner, list) else []
+                last, current = body.get("last_page"), body.get("current_page", page)
+                if isinstance(last, int) and isinstance(current, int):
+                    return items, current >= last
+                # No page count in the JSON (a shape change): fall back to the short-page stop.
+                return items, len(items) < _PER_PAGE
 
             # One paginated walk per (opportunity x term); no terms configured = the raw feed.
             terms: list[str | None] = [*self.search_terms] if self.search_terms else [None]
@@ -134,11 +190,7 @@ class UnstopSource(Source):
                 for term in terms:
                     try:
                         # partial binds THIS opp/term (avoids the late-binding closure trap).
-                        items, walk_done = paginate_until_empty(
-                            partial(fetch_page, opp=opp, term=term),
-                            max_pages=self.max_pages,
-                            page_size=_PER_PAGE,
-                        )
+                        items, walk_done = self._walk(partial(fetch_page, opp=opp, term=term))
                     except SourceError as exc:
                         errors.append(f"{opp}/{term or '*'}: {exc}")
                         exhausted = False
@@ -164,6 +216,32 @@ class UnstopSource(Source):
             exhaustive=exhausted,
         )
 
+    def _walk(self, fetch_page: Callable[[int], tuple[list[Any], bool]]) -> tuple[list[Any], bool]:
+        """Walk pages until the JSON's own current_page reaches last_page, or max_pages.
+
+        Returns (items, exhausted) with the same contract as `_http.paginate_until_empty`. WHY a
+        separate loop: that helper stops on a SHORT page, and Unstop pages come back short while
+        more pages exist (oppstatus=open filters after paging). Audit 2026-09-15: internships x
+        software page 1 held 29 of 30 items with last_page=2. The walk stopped and reported
+        exhausted=True, and page 2 was never read. A short or even empty page does not end this
+        walk. Only the page count does.
+
+        A SourceError on page 1 propagates (the walk failed). On a later page it keeps the pages
+        already read and reports not exhausted.
+        """
+        items: list[Any] = []
+        for page in range(1, self.max_pages + 1):
+            try:
+                batch, last = fetch_page(page)
+            except SourceError:
+                if page == 1:
+                    raise
+                return items, False
+            items.extend(batch)
+            if last:
+                return items, True
+        return items, False  # stopped on the cap: we did NOT see the full view
+
     def _map(self, item: Any, cutoff: datetime) -> RawPosting | None:
         posted = parse_iso(item.get("updated_at")) or parse_iso(item.get("start_date"))
         # Drop stale postings; an unparseable date is kept (can't prove it's old).
@@ -179,15 +257,15 @@ class UnstopSource(Source):
         detail = item.get("jobDetail") or {}
         disclosed = detail.get("show_salary") == 1 and not detail.get("not_disclosed")
         org = item.get("organisation") or {}
-        region = str(item.get("region") or "").strip()
-        return RawPosting(
+        posting = RawPosting(
             source="unstop",
             source_native_id=str(item.get("id")),
             title=str(item.get("title", "")),
             company=str(org.get("name") or item.get("organisation_name") or ""),
             url=_opportunity_url(item),
-            location=region if region and region.lower() != "online" else None,
-            is_remote=True if region.lower() == "online" else None,
+            location=_location(item),
+            uid_location="",  # the location this adapter hashed before it read cities
+            is_remote=_is_remote(item, detail),
             description=_description(item),
             salary_min=pos_int_or_none(detail.get("min_salary")) if disclosed else None,
             salary_max=pos_int_or_none(detail.get("max_salary")) if disclosed else None,
@@ -199,3 +277,11 @@ class UnstopSource(Source):
             else None,
             posted_at=posted,
         )
+        # The posting's own "unpaid" flag -> the UNPAID contract (0 INR/month), so the stipend
+        # floor drops it. WHY set directly: pos_int_or_none maps 0 to None ("not stated"), and
+        # unpaid posts carry show_salary=1 with null amounts, so they used to store as unknown.
+        # "paid" with no amount stays unknown: silence is never read as unpaid.
+        if detail.get("paid_unpaid") == "unpaid":
+            posting.salary_min = posting.salary_max = 0
+            posting.salary_currency, posting.salary_period = "INR", "month"
+        return posting

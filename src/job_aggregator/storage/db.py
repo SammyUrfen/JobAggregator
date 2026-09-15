@@ -22,7 +22,8 @@ BUSY_TIMEOUT_MS = 5000
 # v2: jobs.is_internship column + title-regex backfill of existing rows.
 # v3: jobs.extra_context column (user context feeding tailoring + apply field-fill).
 # v4: jobs.seen ("read, no action") + jobs.full_description (on-demand-fetched full JD).
-SCHEMA_VERSION = 4
+# v5: jobs.closure_checked_at (when sources/closure.py last opened the original posting).
+SCHEMA_VERSION = 5
 
 _MEMORY_DB = ":memory:"
 
@@ -55,10 +56,11 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 def migrate(conn: sqlite3.Connection) -> None:
     """Forward-only migration keyed on `PRAGMA user_version`. v0->v1 just stamps the version;
-    v1->v2 adds jobs.is_internship and backfills it from titles; v2->v3 adds jobs.extra_context."""
+    v1->v2 adds jobs.is_internship and backfills it from titles; v2->v3 adds jobs.extra_context;
+    v3->v4 adds jobs.seen + jobs.full_description; v4->v5 adds jobs.closure_checked_at."""
     row = conn.execute("PRAGMA user_version").fetchone()
     current: int = 0 if row is None else int(row[0])
-    _V2, _V3, _V4 = 2, 3, 4  # migration ids  # noqa: N806 - read as constants
+    _V2, _V3, _V4, _V5 = 2, 3, 4, 5  # migration ids  # noqa: N806 - read as constants
     if current < _V2:
         _migrate_v2_is_internship(conn)
     if current < _V3:
@@ -66,6 +68,8 @@ def migrate(conn: sqlite3.Connection) -> None:
     if current < _V4:
         _add_column_if_absent(conn, "seen", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_absent(conn, "full_description", "TEXT")
+    if current < _V5:
+        _add_column_if_absent(conn, "closure_checked_at", "TEXT")
     if current < SCHEMA_VERSION:
         # PRAGMA does not accept bound params; SCHEMA_VERSION is an int constant we control,
         # so interpolating it is safe (never user input).

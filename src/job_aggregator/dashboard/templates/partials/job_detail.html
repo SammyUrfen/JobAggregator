@@ -13,6 +13,13 @@
     <button type="button" class="modal-close" data-modal-close aria-label="Close details">✕</button>
   </header>
 
+  {#- Set only on the open whose check read the site's closed marker (sources/closure.py). The
+      posting is soft-deleted then, unless he applied to or bookmarked it. -#}
+  {% if applications_closed %}
+    <p class="banner err jd-closed" role="status">Applications closed: the original posting no
+      longer accepts applications.</p>
+  {% endif %}
+
   <div class="jd-badges">
     {% if job.is_internship %}<span class="badge intern">Internship</span>{% endif %}
     {% if job.is_remote %}

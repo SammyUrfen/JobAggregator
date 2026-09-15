@@ -1,13 +1,16 @@
 """Internshala listing-page source: HTML parsing, stipend/ago normalization, fetch pipeline.
 
 Pages are respx-mocked HTML built from the REAL card markup shape (classes verified live
-2026-07-18: .individual_internship / .job-internship-name / .company-name / .stipend /
-.locations / .status-info), so a selector rename in the source shows up as a red test here.
+2026-09-15: .individual_internship / .job-internship-name / .company-name / .stipend /
+.locations / i.ic-16-calendar + span / .about_job .text / .job_skill / ONE of .status-success,
+.status-info, .status-inactive), so a selector rename in the source shows up as a red test here.
+tests/fixtures/internshala_listing.html holds three cards copied from the live audit page.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx
 import pytest
@@ -15,14 +18,22 @@ import respx
 
 from job_aggregator.clock import FixedClock
 from job_aggregator.config.schema import Config
+from job_aggregator.pipeline.signals import internship_months
+from job_aggregator.sources.base import RawPosting
 from job_aggregator.sources.internshala import (
     InternshalaSource,
+    _duration_line,
     _parse_ago,
     _parse_stipend,
+    _url_created_at,
     parse_listing_page,
 )
 
+REAL_LISTING_HTML = (Path(__file__).parent / "fixtures" / "internshala_listing.html").read_text()
 FIXED_NOW = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+# The audit saved the fixture listing page at this time; its ago labels are relative to it.
+CAPTURE_NOW = datetime(2026, 9, 15, 8, 6, tzinfo=UTC)
+WFH_BACKEND_SLUG = "work-from-home-backend-development-internships"
 
 
 def _card(
@@ -31,23 +42,46 @@ def _card(
     company: str = "Acme Labs",
     stipend: str = "₹ 15,000 - 30,000 /month",
     location: str = "Work from home",
-    ago: str = "4 days ago",
+    ago: str | None = "4 days ago",
+    ago_class: str = "status-info",
+    duration: str = "3 Months",
+    about: str = "Build REST APIs with FastAPI.",
+    skills: tuple[str, ...] = ("Python", "FastAPI"),
+    href: str | None = None,
 ) -> str:
+    href = href or f"/internship/detail/{title.lower().replace(' ', '-')}-{iid}"
+    skill_html = "".join(f'<div class="job_skill">{s}</div>' for s in skills)
+    ago_html = f'<div class="{ago_class}"><i></i><span>{ago}</span></div>' if ago else ""
     return f"""
-    <div class="container-fluid individual_internship" internshipid="{iid}"
-         data-href="/internship/detail/{title.lower().replace(" ", "-")}-{iid}">
-      <h3 class="job-internship-name"><a class="job-title-href">{title}</a></h3>
+    <div class="container-fluid individual_internship" internshipid="{iid}" data-href="{href}">
+      <h2 class="job-internship-name"><a class="job-title-href">{title}</a></h2>
       <p class="company-name">{company}</p>
       <div class="detail-row-1">
-        <span class="locations"><a>{location}</a></span>
-        <span class="stipend">{stipend}</span>
+        <div class="row-1-item locations">
+          <i class="ic-16-home"></i><span><a>{location}</a></span>
+        </div>
+        <div class="row-1-item">
+          <i class="ic-16-money"></i><span class="stipend">{stipend}</span>
+        </div>
+        <div class="row-1-item"><i class="ic-16-calendar"></i><span>{duration}</span></div>
       </div>
-      <div class="status-inactive status-info"><span>{ago}</span></div>
+      <div class="about_job"><div class="text">{about}</div></div>
+      <div class="job_skills">{skill_html}</div>
+      <div class="detail-row-2"><div class="color-labels">{ago_html}</div></div>
     </div>"""
 
 
 def _page(*cards: str) -> str:
     return f"<html><body><div id='list'>{''.join(cards)}</div></body></html>"
+
+
+def _raw(card_html: str, now: datetime = FIXED_NOW, slug: str = WFH_BACKEND_SLUG) -> RawPosting:
+    """One card through the real parse + map path, without HTTP."""
+    card = parse_listing_page(_page(card_html))[0]
+    card["slug"] = slug
+    raw = InternshalaSource._map(card, now)
+    assert raw is not None
+    return raw
 
 
 # ── pure parsers ─────────────────────────────────────────────────────────────────────────
@@ -59,13 +93,59 @@ def _page(*cards: str) -> str:
         ("₹ 15,000 - 30,000 /month", (15000, 30000)),
         ("₹ 20,000 /month", (20000, 20000)),
         ("₹ 1,000 /month", (1000, 1000)),
-        ("Unpaid", (None, None)),
+        # Unpaid is a stated zero; every other non-INR text stays unknown (silence is not unpaid).
+        ("Unpaid", (0, 0)),
+        ("  unpaid ", (0, 0)),
+        ("Not provided", (None, None)),
+        ("$ 200 - 300 /month", (None, None)),
         (None, (None, None)),
         ("", (None, None)),
     ],
 )
 def test_parse_stipend(text: str | None, expected: tuple[int | None, int | None]) -> None:
     assert _parse_stipend(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "line", "months"),
+    [
+        ("6 Months", "Duration: 6 months", 6.0),
+        ("1 Month", "Duration: 1 month", 1.0),
+        ("2 Weeks", "Duration: 2 weeks", 0.5),
+        ("Flexible", None, None),
+        ("", None, None),
+        (None, None, None),
+    ],
+)
+def test_duration_line_feeds_the_signal(
+    text: str | None, line: str | None, months: float | None
+) -> None:
+    assert _duration_line(text) == line
+    assert internship_months(line) == months  # the contract line is what the filter reads
+
+
+@pytest.mark.parametrize(
+    ("href", "now", "expected"),
+    [
+        (
+            "/internship/detail/work-from-home-backend-development-internship-at-ambill1788633027",
+            CAPTURE_NOW,
+            datetime(2026, 9, 5, 18, 30, 27, tzinfo=UTC),
+        ),
+        # a company slug ending in digits: the LAST 10 digits are the epoch
+        (
+            "/internship/detail/x-internship-at-acme3601788633027",
+            CAPTURE_NOW,
+            datetime(2026, 9, 5, 18, 30, 27, tzinfo=UTC),
+        ),
+        # an epoch after now cannot be a creation time
+        ("/internship/detail/x-at-ambill1788633027", FIXED_NOW, None),
+        ("/internship/detail/backend-11", CAPTURE_NOW, None),
+        ("", CAPTURE_NOW, None),
+    ],
+)
+def test_url_created_at(href: str, now: datetime, expected: datetime | None) -> None:
+    assert _url_created_at(href, now) == expected
 
 
 @pytest.mark.parametrize(
@@ -99,7 +179,39 @@ def test_parse_listing_page_extracts_cards() -> None:
     assert first["stipend"] == "₹ 15,000 - 30,000 /month"
     assert first["location"] == "Work from home"
     assert first["ago"] == "4 days ago"
+    assert first["duration"] == "3 Months"
+    assert first["about"] == "Build REST APIs with FastAPI."
+    assert first["skills"] == ["Python", "FastAPI"]
     assert first["href"].startswith("/internship/detail/")
+
+
+@pytest.mark.parametrize(
+    ("index", "iid", "stipend", "duration", "ago", "skills"),
+    [
+        (0, "3286172", "Unpaid", "1 Month", "Today", ["HTML", "Python"]),
+        (1, "3282110", "Unpaid", "2 Weeks", "3 days ago", ["Python"]),
+        # a card 1 week+ old carries its label ONLY in .status-inactive (the class the old
+        # parser missed on 24 of 50 live cards)
+        (2, "3270781", "₹ 15,000 /month", "6 Months", "1 week ago",
+         ["JavaScript", "Node.js", "PostgreSQL", "Problem Solving", "Express.js", "React",
+          "Generative AI Development"]),
+    ],
+)  # fmt: skip
+def test_parse_listing_page_real_markup(
+    index: int, iid: str, stipend: str, duration: str, ago: str, skills: list[str]
+) -> None:
+    cards = parse_listing_page(REAL_LISTING_HTML)
+    assert len(cards) == 3
+    card = cards[index]
+    assert (card["id"], card["stipend"], card["duration"], card["ago"], card["skills"]) == (
+        iid,
+        stipend,
+        duration,
+        ago,
+        skills,
+    )
+    assert card["location"] == "Work from home"
+    assert card["about"] and len(card["about"]) > 500  # the card's about text, not empty
 
 
 def test_parse_listing_page_empty_html() -> None:
@@ -196,17 +308,103 @@ def test_fetch_redesigned_page_is_suspicious_empty(cfg: Config) -> None:
     assert res.error is not None and "0 items" in res.error
 
 
-@respx.mock
-def test_unpaid_and_onsite_cards_map_conservatively(cfg: Config) -> None:
-    _mock_slug(
-        "backend-development-internship-in-bangalore",
-        _page(_card("9", "Java Development", stipend="Unpaid", location="Bangalore")),
+@pytest.mark.parametrize(
+    ("stipend", "salary", "currency", "period"),
+    [
+        # UNPAID contract: 0/0 INR/month, so the stipend floor can FAIL it
+        ("Unpaid", (0, 0), "INR", "month"),
+        ("₹ 5,000 /month", (5000, 5000), "INR", "month"),
+        ("Not provided", (None, None), None, None),  # unknown is kept, never read as unpaid
+    ],
+)
+def test_stipend_maps_to_salary_fields(
+    stipend: str, salary: tuple[int | None, int | None], currency: str | None, period: str | None
+) -> None:
+    raw = _raw(_card("9", "Java Development", stipend=stipend))
+    assert (raw.salary_min, raw.salary_max) == salary
+    assert (raw.salary_currency, raw.salary_period) == (currency, period)
+
+
+@pytest.mark.parametrize(
+    ("location", "is_remote", "stored_location"),
+    [
+        ("Work from home", True, None),
+        ("Bangalore", None, "Bangalore"),  # a plain city states no mode
+        ("Chennai, Bangalore (Hybrid)", False, "Chennai, Bangalore (Hybrid)"),
+        ("Bangalore (Hybrid)", False, "Bangalore (Hybrid)"),
+    ],
+)
+def test_work_mode_comes_from_the_card_location(
+    location: str, is_remote: bool | None, stored_location: str | None
+) -> None:
+    raw = _raw(_card("9", "Java Development", location=location))
+    assert raw.is_remote is is_remote
+    assert raw.location == stored_location  # unchanged text: it is part of the job_uid
+
+
+_EPOCH_HREF = "/internship/detail/work-from-home-backend-development-internship-at-ambill1788633027"
+
+
+@pytest.mark.parametrize(
+    ("ago", "ago_class", "href", "expected"),
+    [
+        ("2 days ago", "status-success", None, CAPTURE_NOW - timedelta(days=2)),
+        ("5 days ago", "status-info", None, CAPTURE_NOW - timedelta(days=5)),
+        ("2 weeks ago", "status-inactive", None, CAPTURE_NOW - timedelta(days=14)),
+        # no label: the URL epoch (creation time) fills posted_at instead of NULL
+        (None, "status-info", _EPOCH_HREF, datetime(2026, 9, 5, 18, 30, 27, tzinfo=UTC)),
+        ("Be an early applicant", "status-success", _EPOCH_HREF,
+         datetime(2026, 9, 5, 18, 30, 27, tzinfo=UTC)),
+        (None, "status-info", None, None),  # neither: unknown
+    ],
+)  # fmt: skip
+def test_posted_at_reads_every_label_class_then_the_url_epoch(
+    ago: str | None, ago_class: str, href: str | None, expected: datetime | None
+) -> None:
+    raw = _raw(_card("9", "Backend", ago=ago, ago_class=ago_class, href=href), now=CAPTURE_NOW)
+    assert raw.posted_at == expected
+
+
+def test_description_keeps_slug_and_adds_card_text() -> None:
+    raw = _raw(
+        _card("9", "Backend", about="Ship Go services.", skills=("Go", "gRPC"), duration="2 Weeks")
     )
-    src = InternshalaSource(slugs=["backend-development-internship-in-bangalore"], max_pages=3)
-    job = src.fetch(cfg, FixedClock(FIXED_NOW)).jobs[0]
-    assert job.salary_min is None and job.salary_parsed is False  # Unpaid -> UNKNOWN bucket
-    assert job.is_remote is None
-    assert job.location == "Bangalore"
+    assert raw.description == (
+        "Internshala listing: work from home backend development internships.\n"
+        "Ship Go services.\n"
+        "Skills: Go, gRPC.\n"
+        "Duration: 2 weeks"
+    )
+
+
+def test_description_without_card_text_is_the_slug_line() -> None:
+    raw = _raw(_card("9", "Backend", about="", skills=(), duration=""))
+    assert raw.description == "Internshala listing: work from home backend development internships."
+
+
+@respx.mock
+def test_fetch_real_markup_maps_unpaid_duration_and_age(cfg: Config) -> None:
+    _mock_slug(WFH_BACKEND_SLUG, REAL_LISTING_HTML)
+    res = InternshalaSource(slugs=[WFH_BACKEND_SLUG], max_pages=3).fetch(
+        cfg, FixedClock(CAPTURE_NOW)
+    )
+    assert res.succeeded is True
+    by_id = {job.source_native_id: job for job in res.jobs}
+    expected = {
+        # id: (salary_min, salary_max, salary_parsed, months, days since posted)
+        "3286172": (0, 0, True, 1.0, 0),
+        "3282110": (0, 0, True, 0.5, 3),
+        "3270781": (15000, 15000, True, 6.0, 7),
+    }
+    for iid, (s_min, s_max, parsed, months, days) in expected.items():
+        job = by_id[iid]
+        assert (job.salary_min, job.salary_max, job.salary_parsed) == (s_min, s_max, parsed)
+        assert (job.salary_currency, job.salary_period, job.is_remote) == ("INR", "month", True)
+        assert internship_months(job.description) == months
+        assert job.posted_at == CAPTURE_NOW - timedelta(days=days)
+        assert job.description is not None
+        assert job.description.startswith("Internshala listing: work from home backend")
+    assert "Skills: HTML, Python." in (by_id["3286172"].description or "")
 
 
 # ── detail-page description (on-demand JD fetch) ─────────────────────────────────────────

@@ -224,3 +224,165 @@ def test_no_sites_or_terms_returns_empty_without_calling_seam(
     assert res.succeeded is True
     assert res.jobs == []
     assert calls["n"] == 0  # seam never called
+
+
+# ── stated facts over jobspy's guesses (audit 2026-09-15) ─────────────────────────────────────
+
+
+def _one_job(monkeypatch: pytest.MonkeyPatch, now_clock: FixedClock, site: str, **over: Any) -> Any:
+    monkeypatch.setattr(js, "_scrape_jobs", _fake({site: [_row(**over)]}))
+    res = js.JobSpySource().fetch(_cfg([site], ["backend"]), now_clock)
+    assert res.n_fetched == 1
+    return res.jobs[0]
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "jobspy_flag", "expected"),
+    [
+        # jobspy's substring guess is ignored: silence stays unknown, whatever jobspy said.
+        ("Backend Engineer Intern", "Build backend services.", True, None),
+        # Bytebeam: matched only "remote diagnostics".
+        (
+            "Systems Engineer (Intern)",
+            "Full-time, on-site internship. Remote diagnostics.",
+            True,
+            False,
+        ),
+        # Rubrik: "(No remote options)".
+        ("Software Engineer - Winter Intern", "Onsite internship (No remote options)", True, False),
+        # Weekday: an explicit remote location line.
+        ("Software Engineer Intern", "<p>Location: Bengaluru (Remote)</p>", False, True),
+        # Indeed's own work-location line.
+        ("Intern", "Work Location: In person", True, False),
+        # The title alone can state the mode.
+        ("Software Development Internship in Bangalore (Hybrid)", "Build apps.", False, False),
+    ],
+)
+def test_is_remote_only_when_text_states_it(
+    monkeypatch: pytest.MonkeyPatch,
+    now_clock: FixedClock,
+    title: str,
+    description: str,
+    jobspy_flag: bool,
+    expected: bool | None,
+) -> None:
+    job = _one_job(
+        monkeypatch,
+        now_clock,
+        "linkedin",
+        title=title,
+        description=description,
+        is_remote=jobspy_flag,
+    )
+    assert job.is_remote is expected
+
+
+@pytest.mark.parametrize(
+    ("site", "raw", "expected"),
+    [
+        ("indeed", "KA, IN", "KA, India"),
+        ("indeed", "Bengaluru, KA, IN", "Bengaluru, KA, India"),
+        ("indeed", "IN", "India"),
+        ("indeed", "Bengaluru, Karnataka", "Bengaluru, Karnataka"),  # no country code
+        ("indeed", "Indore, MP, INDIA", "Indore, MP, INDIA"),  # already a name
+        ("linkedin", "Indianapolis, IN", "Indianapolis, IN"),  # Indiana on LinkedIn, not India
+    ],
+)
+def test_indeed_country_code_expanded_and_job_uid_stable(
+    monkeypatch: pytest.MonkeyPatch, now_clock: FixedClock, site: str, raw: str, expected: str
+) -> None:
+    job = _one_job(monkeypatch, now_clock, site, location=raw)
+    assert job.location == expected
+    # The uid still hashes the raw location, so rows stored before the expansion keep their marks.
+    assert job.job_uid == js.content_hash("Acme", "Backend Engineer Intern", raw)
+
+
+def test_indeed_missing_location_stays_none(
+    monkeypatch: pytest.MonkeyPatch, now_clock: FixedClock
+) -> None:
+    assert _one_job(monkeypatch, now_clock, "indeed", location=None).location is None
+
+
+@pytest.mark.parametrize(
+    ("over", "expected"),
+    [
+        # Weekday: a stated range keeps its top.
+        (
+            {"description": "Stipend: ₹30,000 – ₹50,000 per month"},  # noqa: RUF001 - real JD dash
+            (50000, 50000, "INR", "month", True, None, SalaryBucket.PASS),
+        ),
+        # Hanabi: a single figure under the 12k floor.
+        (
+            {"description": "A fixed stipend of Rs.10k/month."},
+            (10000, 10000, "INR", "month", True, None, SalaryBucket.FAIL),
+        ),
+        # Unpaid is 0, never None: the bucket FAILs instead of reading as unknown.
+        (
+            {"description": "This is an unpaid internship."},
+            (0, 0, "INR", "month", True, None, SalaryBucket.FAIL),
+        ),
+        # Silence stays unknown (kept).
+        (
+            {"description": "Build backend services."},
+            (None, None, None, None, False, None, SalaryBucket.UNKNOWN),
+        ),
+        # Structured pay wins over the text.
+        (
+            {
+                "description": "Stipend: ₹5,000 per month",
+                "min_amount": 20000,
+                "max_amount": 25000,
+                "currency": "INR",
+                "interval": "monthly",
+            },
+            (20000, 25000, "INR", "month", True, "INR 20000-25000/monthly", SalaryBucket.PASS),
+        ),
+        # LinkedIn's unusable card pay ("₹", no interval) falls back to the text; raw is kept.
+        (
+            {"description": "Stipend: ₹15,000/month", "min_amount": 15000, "currency": "₹"},
+            (15000, 15000, "INR", "month", True, "₹ 15000", SalaryBucket.PASS),
+        ),
+    ],
+)
+def test_salary_falls_back_to_stated_pay(
+    monkeypatch: pytest.MonkeyPatch,
+    now_clock: FixedClock,
+    over: dict[str, Any],
+    expected: tuple[Any, ...],
+) -> None:
+    job = _one_job(monkeypatch, now_clock, "linkedin", **over)
+    job.is_internship = True  # the runner stamps this before bucketing
+    got = (
+        job.salary_min,
+        job.salary_max,
+        job.salary_currency,
+        job.salary_period,
+        job.salary_parsed,
+        job.salary_raw,
+        js.salary_bucket(job, Config()),
+    )
+    assert got == expected
+
+
+def test_postings_older_than_30_days_are_dropped(
+    monkeypatch: pytest.MonkeyPatch, now_clock: FixedClock
+) -> None:
+    # now_clock is 2026-07-15. Indeed returns months-old postings once job_type is set.
+    rows = [
+        _row(title="Fresh Intern", date_posted=date(2026, 7, 10)),
+        _row(title="Old Intern", date_posted=date(2026, 5, 1)),
+        _row(title="Undated Intern", date_posted=None),
+    ]
+    monkeypatch.setattr(js, "_scrape_jobs", _fake({"indeed": rows}))
+    res = js.JobSpySource().fetch(_cfg(["indeed"], ["intern"]), now_clock)
+    assert sorted(j.title for j in res.jobs) == ["Fresh Intern", "Undated Intern"]
+
+
+def test_a_site_with_only_old_postings_still_succeeds(
+    monkeypatch: pytest.MonkeyPatch, now_clock: FixedClock
+) -> None:
+    rows = [_row(title="Old Intern", date_posted=date(2026, 1, 1))]
+    monkeypatch.setattr(js, "_scrape_jobs", _fake({"indeed": rows}))
+    res = js.JobSpySource().fetch(_cfg(["indeed"], ["intern"]), now_clock)
+    assert res.jobs == []
+    assert res.sub_results == [("jobspy_indeed", True, 0)]

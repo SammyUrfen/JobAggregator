@@ -22,6 +22,12 @@
       <input type="number" id="grace_days" name="grace_days" value="{{ config.schedule.grace_days }}">
       <span class="field-error" data-field-error="schedule.grace_days"></span>
     </div>
+    <div class="field">
+      <label for="closure_checks_per_run">closure_checks_per_run (postings checked for closed applications after each run; 0 = off)</label>
+      <input type="number" id="closure_checks_per_run" name="closure_checks_per_run" min="0"
+             value="{{ config.schedule.closure_checks_per_run }}">
+      <span class="field-error" data-field-error="schedule.closure_checks_per_run"></span>
+    </div>
     <label class="chk"><input type="checkbox" name="catch_up_on_startup" value="true"
       {% if config.schedule.catch_up_on_startup %}checked{% endif %}> catch_up_on_startup</label>
   </fieldset>
@@ -91,6 +97,12 @@
       <input type="number" id="max_experience_years" name="max_experience_years" min="0"
              value="{{ config.keywords.max_experience_years }}">
       <span class="field-error" data-field-error="keywords.max_experience_years"></span>
+    </div>
+    <div class="field">
+      <label for="max_internship_months">max_internship_months (drop internships stating a longer duration; unstated is kept; 0 = off)</label>
+      <input type="number" id="max_internship_months" name="max_internship_months" min="0"
+             value="{{ config.keywords.max_internship_months }}">
+      <span class="field-error" data-field-error="keywords.max_internship_months"></span>
     </div>
     <div class="field">
       <label for="locations">locations</label>

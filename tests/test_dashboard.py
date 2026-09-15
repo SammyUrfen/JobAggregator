@@ -235,6 +235,17 @@ def test_default_hides_hidden(client: TestClient) -> None:
     assert "j3" in with_hidden
 
 
+def test_default_hides_stale_unless_applied_or_bookmarked(client: TestClient, db_path: str) -> None:
+    conn = connect(db_path)
+    conn.execute("UPDATE jobs SET status = 'stale'")
+    conn.execute("UPDATE jobs SET bookmarked = 0 WHERE job_uid = 'j2'")
+    conn.commit()
+    conn.close()
+    assert set(_uid_order(client.get("/").text)) == {"j1"}  # j1 is applied, j2 has no flag
+    assert set(_uid_order(client.get("/?applied=1").text)) == {"j1"}
+    assert set(_uid_order(client.get("/?show_hidden=1").text)) == {"j1", "j2", "j3"}
+
+
 @pytest.mark.parametrize(
     ("query", "expected"),
     [
@@ -1063,9 +1074,13 @@ def test_internshala_detail_enriches_and_caches(
 
     def fake_fetch(url: str) -> str:
         calls.append(url)
-        return "<p>Real JD: build backend APIs with Django.</p>"
+        return (
+            '<div class="internship_details"><p>Real JD: build backend APIs with Django.</p></div>'
+            '<input type="hidden" id="status" value="active">'
+        )
 
-    monkeypatch.setattr("job_aggregator.sources.internshala.fetch_detail_description", fake_fetch)
+    # The modal fetches the whole detail page once: the JD and the closed state both come from it.
+    monkeypatch.setattr("job_aggregator.dashboard.routes_jobs._fetch_internshala_page", fake_fetch)
     r = client.get("/api/jobs/ish/detail")
     assert r.status_code == 200
     assert "Real JD: build backend APIs with Django." in r.text  # enriched

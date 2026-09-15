@@ -67,7 +67,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   extra_context    TEXT,
   -- full posting description fetched on demand (e.g. Internshala's real JD, whose listing only
   -- gives a slug). Preserved across re-fetch so it isn't clobbered by the source's short text.
-  full_description TEXT
+  full_description TEXT,
+  -- when sources/closure.py last opened the original posting to read its closed marker (ISO8601
+  -- UTC). NULL = never checked, so the sweep checks it first.
+  closure_checked_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status     ON jobs(status);

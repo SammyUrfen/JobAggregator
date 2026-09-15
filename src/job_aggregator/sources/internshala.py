@@ -2,7 +2,8 @@
 
 No JSON API exists, but the server-rendered listing pages under /internships/<filter-slug>/ are
 plain HTML behind no Cloudflare wall, robots.txt-allowed, and carry everything the pipeline
-needs per card: title, company, stipend (native INR/month), location, posted-ago, detail link.
+needs per card: title, company, stipend (native INR/month), location, duration, posted-ago, a
+short about text, skills, detail link.
 (research.md's 2026-07-14 "filter URLs redirect" dead-end note went stale — verified live
 2026-07-18: every configured slug returns 200 with correctly filtered results.)
 
@@ -32,6 +33,7 @@ from job_aggregator.sources.base import (
     SourceResult,
     build_result,
     elapsed_ms,
+    from_epoch_seconds,
 )
 
 if TYPE_CHECKING:
@@ -42,25 +44,41 @@ log = logging.getLogger(__name__)
 
 _BASE = "https://internshala.com"
 _CARDS_PER_PAGE = 50  # observed page size; a short page ends pagination
-# The real job description lives on the DETAIL page (the listing card only carries the category
-# slug). We fetch it ON DEMAND when the user opens a job — a human action, one page at a time —
-# not in the automated run (robots is ambiguous about bulk detail crawling). `.internship_details`
-# holds the "About the internship" + skills + who-can-apply blocks (selector verified live).
+# The full job description lives on the DETAIL page (the listing card carries only an about text
+# and a skills list). We fetch it ON DEMAND when the user opens a job — a human action, one page
+# at a time — not in the automated run (robots is ambiguous about bulk detail crawling).
+# `.internship_details` holds the "About the internship" + skills + who-can-apply blocks
+# (selector verified live).
 _DETAIL_SELECTOR = ".internship_details"
 # Detail HTML can be large; cap what we store (the modal renderer caps display anyway).
 _MAX_DETAIL_CHARS = 12000
 # Stipend text is native INR/month: "₹ 15,000 - 30,000 /month" | "₹ 20,000 /month" | "Unpaid".
 _STIPEND_RE = re.compile(r"₹\s*([\d,]+)(?:\s*-\s*([\d,]+))?\s*/month")
+# The card's exact word for a zero stipend (10 of 50 cards on the 2026-09-15 audit page). Other
+# non-numeric text ("Not provided", "$ 200 - 300 /month") stays unknown: silence is not unpaid.
+_UNPAID_STIPEND = "unpaid"
 # "4 days ago" / "2 weeks ago" / "1 month ago"; "Today"/"Just now"/"Few hours ago" -> now.
 _AGO_RE = re.compile(r"(\d+)\s*(minute|hour|day|week|month)s?\s+ago", re.IGNORECASE)
 _AGO_UNIT_DAYS = {"minute": 0.0, "hour": 0.0, "day": 1.0, "week": 7.0, "month": 30.0}
+# The ago label moves between classes as a card ages: status-success (today), status-info (days),
+# status-inactive (1 week+). Reading only the first two lost posted_at on 24 of 50 live cards.
+_AGO_SELECTOR = ".status-success, .status-info, .status-inactive"
+# The card duration is the span after the calendar icon: "6 Months", "1 Month", "2 Weeks" (the
+# only shapes on 214 audited cards). Anything else is left out, so the duration stays unknown.
+_DURATION_SELECTOR = "i.ic-16-calendar + span"
+_DURATION_RE = re.compile(r"(\d+)\s*(weeks?|months?)", re.IGNORECASE)
+# Detail URLs end in the posting's creation time as 10-digit epoch seconds ("...ambill1788633027").
+# It backs up the ago label; the audit matched it to APPLY BY minus 30 days on 18 of 29 pages.
+_URL_EPOCH_RE = re.compile(r"(\d{10})/?$")
 
 
 def _parse_stipend(text: str | None) -> tuple[int | None, int | None]:
-    """(min, max) INR/month from the stipend text; (None, None) for Unpaid/absent/unparseable
-    (the job then buckets UNKNOWN, which keep_and_flag retains)."""
+    """(min, max) INR/month from the stipend text: (0, 0) for "Unpaid", (None, None) when the
+    text is absent or states no INR amount (the job then buckets UNKNOWN and is kept)."""
     if not text:
         return None, None
+    if text.strip().lower() == _UNPAID_STIPEND:
+        return 0, 0
     m = _STIPEND_RE.search(text)
     if not m:
         return None, None
@@ -81,6 +99,20 @@ def _parse_ago(text: str | None, now: datetime) -> datetime | None:
     if not m:
         return None
     return now - timedelta(days=float(m.group(1)) * _AGO_UNIT_DAYS[m.group(2).lower()])
+
+
+def _url_created_at(href: str, now: datetime) -> datetime | None:
+    """Creation time from the epoch suffix of a detail URL, or None when there is none. A time
+    after `now` cannot be a creation time (a slug that merely ends in digits), so it is None."""
+    m = _URL_EPOCH_RE.search(urlparse(href).path)
+    created = from_epoch_seconds(m.group(1)) if m else None
+    return created if created is not None and created <= now else None
+
+
+def _duration_line(text: str | None) -> str | None:
+    """The contract's "Duration: N months" / "N weeks" line from the card duration text."""
+    m = _DURATION_RE.fullmatch((text or "").strip())
+    return f"Duration: {m.group(1)} {m.group(2).lower()}" if m else None
 
 
 def _card_text(card: Any, selector: str) -> str | None:
@@ -141,7 +173,10 @@ def parse_listing_page(html: str) -> list[dict[str, Any]]:
                 "company": _card_text(card, ".company-name"),
                 "stipend": _card_text(card, ".stipend"),
                 "location": _card_text(card, ".locations"),
-                "ago": _card_text(card, ".status-info") or _card_text(card, ".status-success"),
+                "ago": _card_text(card, _AGO_SELECTOR),
+                "duration": _card_text(card, _DURATION_SELECTOR),
+                "about": _card_text(card, ".about_job .text"),
+                "skills": [el.get_text(" ", strip=True) for el in card.select(".job_skill")],
             }
         )
     return cards
@@ -216,8 +251,24 @@ class InternshalaSource(Source):
             title = f"{title} Internship"
         location = (card.get("location") or "").strip()
         is_wfh = location.lower() == "work from home"
+        # Hybrid cards append "(Hybrid)" to the cities ("Chennai, Bangalore (Hybrid)"); a plain city
+        # card states no mode, so it stays None. The location text is kept as is: it is part of
+        # the job_uid, and changing it would re-key every stored row.
+        is_remote = True if is_wfh else (False if "(hybrid)" in location.lower() else None)
+        # An "Unpaid" card gives (0, 0), and 0 is not None, so INR/month is set with it too.
         s_min, s_max = _parse_stipend(card.get("stipend"))
         slug_words = str(card.get("slug") or "").replace("-", " ")
+        skills = ", ".join(card.get("skills") or [])
+        # The slug line stays first so every posting keeps the must_have/role match it had when the
+        # slug was the whole description (the gates only gain matches from more text). The card's
+        # about text, skills and duration line feed the unpaid, duration and work-mode signals and
+        # the modal.
+        description_parts = [
+            f"Internshala listing: {slug_words}." if slug_words else None,
+            card.get("about"),
+            f"Skills: {skills}." if skills else None,
+            _duration_line(card.get("duration")),
+        ]
         return RawPosting(
             source="internshala",
             source_native_id=str(card.get("id") or "") or None,
@@ -225,13 +276,13 @@ class InternshalaSource(Source):
             company=company,
             url=f"{_BASE}{href}" if href.startswith("/") else href,
             location=None if is_wfh else (location or None),
-            is_remote=True if is_wfh else None,
-            # The filter slug IS the listing's category — surfacing it gives the must_have
-            # stack-anchor gate honest text to match (cards carry no description).
-            description=f"Internshala listing: {slug_words}." if slug_words else None,
+            is_remote=is_remote,
+            description="\n".join(p for p in description_parts if p) or None,
             salary_min=s_min,
             salary_max=s_max,
             salary_currency="INR" if s_min is not None else None,
             salary_period="month" if s_min is not None else None,
-            posted_at=_parse_ago(card.get("ago"), now),
+            # The ago label first, as before; the URL epoch covers a card whose label is missing
+            # or unreadable, so the upsert does not overwrite posted_at with NULL.
+            posted_at=_parse_ago(card.get("ago"), now) or _url_created_at(href, now),
         )

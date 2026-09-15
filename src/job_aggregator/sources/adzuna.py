@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
 from job_aggregator.errors import SourceError
+from job_aggregator.pipeline import signals
 from job_aggregator.sources._http import get_json, make_client, paginate_until_empty
 from job_aggregator.sources.base import (
     RawPosting,
@@ -39,6 +41,18 @@ _INTERN_MAX_DAYS_OLD = 35
 _INTERN_PAGES = 6  # ~266 fresh IT internships ≈ 6 pages of 50
 # Adzuna localizes pay to the country's currency; map the ISO country to it.
 _ADZUNA_CCY = {"in": "INR", "gb": "GBP", "us": "USD", "au": "AUD", "ca": "CAD", "de": "EUR"}
+# Adzuna sends a monthly INR stipend in the same fields as an annual salary (live 2026-09-15: an
+# intern-to-hire with a lone salary_min=15000 would read as 1,250/month and fail a 12k floor).
+# A lone figure below this is a monthly stipend. The known ceiling: a stipend above it that Adzuna
+# sends this way still reads as annual (0 in the audit).
+_MONTHLY_PAY_CEILING = 50_000
+# Hashtag Web3 reposts show "India" as the Adzuna location. Their real one is only in this
+# preview line: of 75 such rows on 2026-09-15, 1 was in Bangalore and 17 in hybrid New York.
+_SETUP_LOCATION_RE = re.compile(r"Location & Setup:\s*(.+?)\s*Overview:")
+# The same template adds this sentence to every repost. Its "infrastructure" is a must_have
+# anchor, so audit and treasury interns passed the role gate. The lazy `.{0,80}?` (not `[^.]*`)
+# lets a company name hold a dot, e.g. "Crypto.com".
+_WEB3_BOILERPLATE_RE = re.compile(r"Contribute directly to .{0,80}?blockchain infrastructure\.\s*")
 
 
 def _role_queries(cfg: Config) -> list[str]:
@@ -129,19 +143,52 @@ class AdzunaSource(Source):
 
     def _map(self, item: Any) -> RawPosting:
         company = (item.get("company") or {}).get("display_name", "")
-        location = (item.get("location") or {}).get("display_name")
+        title = str(item.get("title", ""))
+        api_location = (item.get("location") or {}).get("display_name")
+        location = api_location
+        description = item.get("description")
+        remote: bool | None = None
+        setup = None
+        if description:
+            description = _WEB3_BOILERPLATE_RE.sub("", description)
+            setup = _SETUP_LOCATION_RE.search(description)
+        if setup:
+            location = setup.group(1)
+            # Remote only when the value names no place: "Remote - Canada" and "LATAM - Remote"
+            # limit where the hire may live, so they go through the location gate.
+            if not signals.place_words(location):
+                remote = True
+            elif signals.remote_flag(signals.work_mode(location)) is False:
+                remote = False  # "Hybrid - New York, NY"
+        else:
+            remote = signals.remote_flag(signals.work_mode(f"{title} {description or ''}"))
+        salary_min = pos_int_or_none(item.get("salary_min"))
+        salary_max = pos_int_or_none(item.get("salary_max"))
+        currency = _ADZUNA_CCY.get(self.country.lower())
+        top = max(salary_min or 0, salary_max or 0)
+        # Only a LONE figure can be a monthly stipend sent in the salary fields. A range under the
+        # ceiling ("36000-48000" for a "Stipend: 3-5k" posting) is still annual pay.
+        lone_monthly = salary_max is None and currency == "INR" and top < _MONTHLY_PAY_CEILING
+        period = "month" if lone_monthly else "year"
+        stated = None if top else signals.stated_monthly_pay_inr(description)
+        if stated is not None:
+            # Set directly: pos_int_or_none would turn an unpaid 0 into unknown pay. The stated
+            # figure is the top of its range, so it only fills the max (0-0 means unpaid).
+            salary_min = 0 if stated == 0 else None
+            salary_max, currency, period = stated, "INR", "month"
         return RawPosting(
             source="adzuna",
             source_native_id=str(item.get("id")),
-            title=str(item.get("title", "")),
+            title=title,
             company=str(company),
             url=str(item.get("redirect_url", "")),
             location=location,
-            is_remote=None,
-            description=item.get("description"),
-            salary_min=pos_int_or_none(item.get("salary_min")),
-            salary_max=pos_int_or_none(item.get("salary_max")),
-            salary_currency=_ADZUNA_CCY.get(self.country.lower()),
-            salary_period="year",
+            uid_location=api_location or "",  # the setup line must not re-key stored rows
+            is_remote=remote,
+            description=description,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            salary_currency=currency,
+            salary_period=period,
             posted_at=parse_iso(item.get("created")),
         )

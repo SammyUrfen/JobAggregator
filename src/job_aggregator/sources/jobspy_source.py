@@ -14,10 +14,11 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING, Any, SupportsFloat, SupportsInt
+from datetime import UTC, date, datetime, timedelta
+from typing import TYPE_CHECKING, Any, SupportsFloat
 
 from job_aggregator.models.job import Job
+from job_aggregator.pipeline import signals
 from job_aggregator.pipeline.dedup import canonical_url, content_hash
 from job_aggregator.pipeline.salary import salary_bucket, to_inr_month
 from job_aggregator.sources.base import Source, SourceResult, parse_iso
@@ -37,8 +38,16 @@ _VERBOSE = 1
 # otherwise render as literal "**bold**"/"- item" text in the detail modal.
 _DESCRIPTION_FORMAT = "html"
 _INTERVAL_TO_PERIOD = {"yearly": "year", "annual": "year", "monthly": "month", "hourly": "hour"}
-_TRUE_STRINGS = frozenset({"true", "1", "yes"})
-_FALSE_STRINGS = frozenset({"false", "0", "no"})
+# jobspy builds an Indeed location from city, state code and ISO country code ("KA, IN"). The
+# location gate matches whole tokens against names such as "India", so "IN" never matched and
+# only jobspy's false remote flag let these rows through (audit 2026-09-15). Indeed only: on
+# LinkedIn a trailing "IN" is the US state Indiana ("Indianapolis, IN").
+# Indeed ignores hours_old when job_type is set, so it returns postings from months ago: a live run
+# on 2026-09-15 stored Indeed internships posted 3, 7 and 10 months earlier. A posting older than
+# this is dropped at ingest (an undated one stays: silence is never a reason to drop).
+_MAX_POSTING_AGE = timedelta(days=30)
+_INDEED_INDIA_CODE = "IN"
+_INDIA = "India"
 
 
 def _is_missing(value: object) -> bool:
@@ -63,27 +72,6 @@ def _clean_float(value: object) -> float | None:
             return float(value.strip())
         except ValueError:
             return None
-    return None
-
-
-def _str_to_bool(value: str) -> bool | None:
-    v = value.strip().lower()
-    if v in _TRUE_STRINGS:
-        return True
-    if v in _FALSE_STRINGS:
-        return False
-    return None
-
-
-def _clean_bool(value: object) -> bool | None:
-    if _is_missing(value):
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return _str_to_bool(value)
-    if isinstance(value, SupportsInt):  # numpy bool_/int
-        return bool(int(value))
     return None
 
 
@@ -154,8 +142,17 @@ def _build_scrape_kwargs(site: str, term: str, jc: JobSpyConfig) -> dict[str, An
     return kwargs
 
 
-def _map_salary(row: Any, cfg: Config) -> dict[str, Any]:
-    """Salary fields for a Job: normalized INR/month when convertible, else raw-only + unparsed."""
+def _indeed_location(location: str | None) -> str | None:
+    """Indeed's trailing country code IN -> India ("KA, IN" -> "KA, India")."""
+    if location is None:
+        return None
+    head, sep, code = location.rpartition(", ")
+    return f"{head}{sep}{_INDIA}" if code == _INDEED_INDIA_CODE else location
+
+
+def _map_salary(row: Any, cfg: Config, description: str | None) -> dict[str, Any]:
+    """Salary fields for a Job: normalized INR/month when convertible, else the monthly INR pay
+    the description states (0 = unpaid), else raw-only + unparsed."""
     interval = _clean_str(row.get("interval"))
     currency = _clean_str(row.get("currency"))
     min_raw = _clean_float(row.get("min_amount"))
@@ -177,6 +174,20 @@ def _map_salary(row: Any, cfg: Config) -> dict[str, Any]:
             "salary_raw": raw_repr,
             "salary_parsed": True,
         }
+    # The audit found 0 of 414 jobspy rows with usable structured pay, while the fetched JD text
+    # states it ("Stipend: ₹30,000 - ₹50,000 per month", "unpaid"). Without this every row sat in
+    # 'unknown' and the stipend floor could never act. Unpaid (0) is set here directly: the
+    # min = max = 0 INR/month shape is the contract salary_bucket FAILs on.
+    stated = signals.stated_monthly_pay_inr(description)
+    if stated is not None:
+        return {
+            "salary_min": stated,
+            "salary_max": stated,
+            "salary_currency": "INR",
+            "salary_period": "month",
+            "salary_raw": raw_repr,
+            "salary_parsed": True,
+        }
     return {"salary_raw": raw_repr, "salary_parsed": False}
 
 
@@ -186,21 +197,23 @@ class _SiteStat:
     errors: int = 0
     rows: int = 0
     jobs: int = 0
+    too_old: int = 0
     last_error: str | None = None
 
     @property
     def succeeded(self) -> bool:
         # Suspicious-empty is per-site: a site that produced no usable jobs did NOT "succeed",
-        # so the runner leaves its previously-seen jobs untouched.
-        return self.jobs > 0
+        # so the runner leaves its previously-seen jobs untouched. A posting dropped for its age
+        # still proves the site answered with real rows.
+        return self.jobs > 0 or self.too_old > 0
 
 
 class JobSpySource(Source):
     name = "jobspy"
 
     def fetch(self, cfg: Config, clock: Clock) -> SourceResult:
-        # clock is unused: jobspy windows by hours_old, not an injected now.
         jc = cfg.sources.jobspy
+        cutoff = clock.now() - _MAX_POSTING_AGE
         started = time.monotonic()
         if not jc.sites or not jc.search_terms:
             return SourceResult(source=self.name, succeeded=True, jobs=[], n_fetched=0)
@@ -223,6 +236,9 @@ class JobSpySource(Source):
                 for row in rows:
                     job = self._row_to_job(row, site, cfg)
                     if job is None:
+                        continue
+                    if job.posted_at is not None and job.posted_at < cutoff:
+                        st.too_old += 1
                         continue
                     key = (site, job.job_uid)
                     if key in seen:
@@ -256,19 +272,26 @@ class JobSpySource(Source):
         url = _clean_str(row.get("job_url"))
         if not title or not company or not url:
             return None  # required fields missing -> drop the row
-        location = _clean_str(row.get("location"))
+        raw_location = _clean_str(row.get("location"))
+        location = _indeed_location(raw_location) if site == "indeed" else raw_location
+        description = _clean_str(row.get("description"))
+        # jobspy's own is_remote is a bare substring test ("no remote", "remote diagnostics" count
+        # as remote): 4 of 11 audited remote LinkedIn rows were on-site. Only a stated mode counts.
+        mode = signals.work_mode("\n".join(filter(None, (title, description, location))))
         job = Job(
-            job_uid=content_hash(company, title, location or ""),
+            # Hashed on the RAW location so the Indeed expansion keeps existing job_uids, and
+            # with them the owner's seen/applied marks.
+            job_uid=content_hash(company, title, raw_location or ""),
             source=f"jobspy_{site}",
             source_native_id=None,
             title=title,
             company=company,
             location=location,
-            is_remote=_clean_bool(row.get("is_remote")),
+            is_remote=signals.remote_flag(mode),
             url=canonical_url(url),
-            description=_clean_str(row.get("description")),
+            description=description,
             posted_at=_clean_dt(row.get("date_posted")),
-            **_map_salary(row, cfg),
+            **_map_salary(row, cfg, description),
         )
         job.salary_bucket = salary_bucket(job, cfg)  # Job is mutable
         return job

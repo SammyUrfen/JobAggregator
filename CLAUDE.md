@@ -291,6 +291,65 @@ model saw projects in keyword order with no strength signal.
 - Live: that internship posting 1 page with 4 projects, a Java backend posting 1 page after dropping its 4th
   project, an AI Engineer posting 1 page after one bullet. The model's picks vary between runs.
 
+**Feed quality pass (2026-09-15, 848 passed, 93.1% cov, schema v5):** the owner found unpaid
+postings, stipends under 12k, false "remote" badges, closed applications and 6-month internships
+in the feed. A 6-agent live audit (per-source page checks plus a replay of 1,371 fetched postings)
+measured each cause, then 7 workers built the fixes against a frozen contract. His rules: drop
+"unpaid", keep "no stipend stated", drop a known internship stipend under 12k (top of range), drop
+an internship that states more than 4 months, never drop on silence.
+- **`pipeline/signals.py` (new, pure):** `work_mode`, `says_unpaid`, `stated_monthly_pay_inr`,
+  `internship_months`. Each answers only when the text states the fact. Patterns carry the false
+  match they avoid ("unpaid leave", "remote diagnostics", "6 months of experience").
+- **Config:** `salary.min_internship` 12000 (was 0), `keywords.max_internship_months` 4 (0 = off),
+  `schedule.closure_checks_per_run` 25 (0 = off). All three are in the config page.
+- **Filters:** new hard gates `unpaid` and `duration:<n>m`, before the location gate. Unpaid is
+  stored as salary 0/0 INR/month, so the stipend floor also fails it.
+- **Adapters:** Unstop mode from `jobDetail.type` (region was "online" on 100% of items, so every
+  row said remote), city + ", India" location, `pay_in` "monthly"/"annually", `paid_unpaid`, and a
+  `last_page` walk. Internshala "Unpaid" -> 0, card duration -> a "Duration: N months" line, card
+  text + skills in the description, posted_at from `.status-inactive` or the URL epoch, "(Hybrid)"
+  -> not remote. jobspy: remote only when the text states it, Indeed "KA, IN" -> "KA, India", pay
+  from the JD text, postings over 30 days old dropped (Indeed ignores hours_old with job_type).
+  Adzuna: the Web3-repost "Location & Setup:" line (remote only when it names no place, so
+  "Remote - Canada" goes through the location gate), the boilerplate sentence removed, a LONE INR
+  figure under 50k read as a monthly stipend (a range stays annual: "36000-48000" was "Stipend:
+  3-5k"), pay from the preview. RemoteOK: 30-day age cap, remote only for a placeless location
+  (ponytail: a bare "Pune" with no "India" drops as location_mismatch). Himalayas: page size 20
+  and windowed (it deleted open postings).
+- **Identity:** `RawPosting.uid_location` keeps job_uids stable when an adapter changes the shown
+  location. Unstop hashes no location and Adzuna the API location, as the old adapters did, so
+  applied and seen marks stay on their rows. jobspy hashes the raw location.
+- **Storage/runner:** the upsert relinks url + source_native_id when the SAME source reposts under
+  a new id (and clears full_description + closure_checked_at). No relink for a per-request token in
+  the link, for an applied or bookmarked row (its link and JD are the record of the application),
+  or twice in one run (two open postings under one uid swapped links every upsert). A new runner
+  step retires stored rows that fail today's filters (not applied or bookmarked), and it reads pay
+  from the text when none is stored. The location gate matches place words only: "Remote - US" no
+  longer matches the configured "Remote - India" on the word "remote". The dashboard hides `stale`
+  rows unless "Show hidden" is on or the row is applied or bookmarked.
+- **`sources/closure.py` (new):** closed-application markers for LinkedIn (301 expired_jd_redirect
+  or `closed-job`), Internshala (`input#status`) and Unstop (`reg_status` FINISHED). "open" also
+  needs a positive marker, so a block reads "unknown". A sweep after each run makes 25 checks,
+  oldest knowledge first: a never-checked row counts from its first sighting, so rows the source
+  listed as open minutes earlier wait. LinkedIn gets a 5 s gap. A domain stops at its first block,
+  and its rows cost no budget. The modal checks a posting on open (once a day). Adzuna is NOT
+  checked: adzuna.in answers the app's self-identifying UA with 429 (a plain browser UA gets the
+  page), and the app does not disguise itself.
+- **Live deploy (run #58, 2026-09-15, 117 s):** backup at
+  `data/backups/jobs.pre-v5-feed-quality-2026-09-15.db`. A one-off backfill first rewrote the
+  stored fields the new adapters read differently (Adzuna Web3 location, remote flag and text,
+  jobspy remote flag: 346 rows, uids unchanged), so the retire step judged old rows by the new
+  rules. Visible rows 1,336 -> 1,092, internships 585 -> 352, remote badges 233 -> 103. Retired
+  175: role, skill or location gate 75 (74 are Web3 reposts), duration 48, stipend under floor 40,
+  unpaid 13. The sweep closed 16 of 25. Internshala 177 -> 63: 48 retired, and 67 NGO reposts
+  that today's filters drop at ingest went stale (hidden, deleted after grace_days). No applied or
+  bookmarked row was removed.
+- **Review:** an adversarial review with a verify pass confirmed 22 findings and refuted 2. All
+  are fixed, except the RemoteOK bare-city case above. Every signals fix was re-diffed over 3,451
+  real texts: only the intended rows changed.
+- **Known costs:** rows he had marked seen can be retired by the new rules (41 on the first A/B).
+  At 25 checks a run, the first closure pass over about 480 checkable rows takes about 20 runs.
+
 **Remaining known-undone:** the agentic apply still hasn't completed a REAL end-to-end submission
 by the user (it now reaches + drafts the whole form incl. screening Qs; a real headful run is
 still the pending check); LinkedIn Easy Apply remains best-effort (anti-bot); résumé tailoring

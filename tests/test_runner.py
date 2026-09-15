@@ -9,11 +9,21 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from _fakes import FakeSource, RaisingSource, RecordingNotifier, make_job
 from job_aggregator.clock import FixedClock
 from job_aggregator.config.schema import Config
 from job_aggregator.pipeline.runner import run_cycle
+from job_aggregator.sources import closure
 from job_aggregator.storage import jobs_repo
+
+
+@pytest.fixture(autouse=True)
+def _no_closure_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default config enables the closure sweep, which opens real posting pages. These
+    runs store rows under checkable source names (jobspy_linkedin), so stub it: no network."""
+    monkeypatch.setattr(closure, "sweep", lambda *_: {})
 
 
 def _count(conn: sqlite3.Connection) -> int:

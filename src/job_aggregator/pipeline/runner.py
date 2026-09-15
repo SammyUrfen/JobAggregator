@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
+from collections import Counter
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -18,9 +19,12 @@ from typing import TYPE_CHECKING, Protocol
 
 from job_aggregator.config.schema import Config
 from job_aggregator.errors import RunInProgressError
+from job_aggregator.models.job import SalaryBucket
+from job_aggregator.pipeline import signals
 from job_aggregator.pipeline.filters import detect_internship, score_and_filter
 from job_aggregator.pipeline.salary import convert_bounds, salary_bucket
 from job_aggregator.pipeline.stale import expire_stale
+from job_aggregator.sources import closure
 from job_aggregator.sources.base import Source, SourceResult
 from job_aggregator.storage import jobs_repo, runs_repo
 
@@ -91,9 +95,11 @@ def run_cycle(
         conn.commit()
         n_new, n_updated, n_filtered = _filter_and_upsert(conn, run_id, results, cfg, clock)
         conn.commit()
+        _retire_failing_jobs(conn, cfg)
         n_expired = expire_stale(
             conn, run_id, succeeded, cfg, clock, windowed_sources=_windowed_names(results)
         )
+        _sweep_closures(conn, cfg, clock)
         resolved_notifiers = _notify(conn, run_id, cfg, clock, notifiers)  # step 8: per-job
         status = _run_status(n_ok, n_err)
         runs_repo.finish_run(
@@ -268,6 +274,59 @@ def _filter_and_upsert(
             else:
                 n_updated += 1
     return n_new, n_updated, n_filtered
+
+
+def _retire_failing_jobs(conn: sqlite3.Connection, cfg: Config) -> Counter[str]:
+    """Soft-delete stored rows that today's filters would drop at ingest. Returns counts by
+    drop reason.
+
+    WHY: filters only run at ingest. A config change (a stipend floor, a duration cap) or a new
+    gate never reached rows already stored, and a windowed source keeps such a row visible for up
+    to windowed_retire_days. This re-runs the ingest verdict (stamp is_internship, bucket the
+    stored INR/month pay, score_and_filter) over every visible row, so the feed matches the config
+    after one run. Stored pay is already normalized at ingest, so it is not converted again. When
+    no pay is stored, the text fills it as the adapters do at ingest: rows stored before that rule,
+    and a cached full JD, often state a stipend that the listing text did not.
+    Applied and bookmarked rows are exempt. Idempotent: a retired row is no longer a candidate.
+    A retired row that its source returns again is revived by the upsert and retired again here.
+    ponytail: one full pass per run, O(visible rows) regex work (1,358 rows took 1.4 s on the
+    2026-09-15 DB copy); filter by last_seen_cycle if the table outgrows a daily run.
+    """
+    reasons: Counter[str] = Counter()
+    failing: list[str] = []
+    for job in jobs_repo.refilter_candidates(conn):
+        job.is_internship = detect_internship(job.title)
+        job.salary_bucket = salary_bucket(job, cfg)
+        if job.salary_bucket is SalaryBucket.UNKNOWN:
+            stated = signals.stated_monthly_pay_inr(job.description)
+            if stated is not None:
+                job.salary_min = job.salary_max = stated
+                job.salary_currency, job.salary_period, job.salary_parsed = "INR", "month", True
+                job.salary_bucket = salary_bucket(job, cfg)
+        verdict = score_and_filter(job, cfg)
+        if not verdict.keep:
+            failing.append(job.job_uid)
+            reasons[verdict.reasons[0]] += 1
+    n = jobs_repo.retire_jobs(conn, failing)
+    if n:
+        logger.info("retired %d stored jobs that fail the current filters: %s", n, dict(reasons))
+    return reasons
+
+
+def _sweep_closures(conn: sqlite3.Connection, cfg: Config, clock: Clock) -> None:
+    """Check a few visible postings against their original page and retire the closed ones.
+
+    WHY wrapped: the sweep makes network calls to sites that block, throttle and redesign. The
+    run's data is already committed, so a sweep failure must cost only this sweep, never the run.
+    """
+    if cfg.schedule.closure_checks_per_run <= 0:
+        return
+    try:
+        counts = closure.sweep(conn, cfg, clock)
+    except Exception:
+        logger.exception("closure sweep raised (ignored)")
+        return
+    logger.info("closure sweep: %s", counts)
 
 
 def _notify(

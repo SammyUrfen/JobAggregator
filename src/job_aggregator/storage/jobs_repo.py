@@ -4,8 +4,10 @@ Invariants (PLAN §1 + §4.1):
 - Bookkeeping timestamps are UTC ISO-8601 from `clock.now().isoformat()` so lexicographic
   ordering == chronological. `posted_at` is display-only (may carry a source's own tz).
 - USER FLAGS (`applied`/`bookmarked`/`hidden`/`notes`) MUST survive a re-scrape: the upsert's
-  ON CONFLICT clause never touches them, and `source`/`url`/`first_seen_at` keep first-seen
+  ON CONFLICT clause never touches them, and `source`/`first_seen_at` keep first-seen
   provenance while everything else (salary, description, score, ...) is refreshed.
+- `url`/`source_native_id` follow the SAME source's latest sighting (a repost under a new id
+  must not keep linking to the closed original) but keep first-seen provenance across sources.
 """
 
 from __future__ import annotations
@@ -20,9 +22,10 @@ from job_aggregator.models.job import Job, JobStatus, SalaryBucket
 UpsertOutcome = Literal["new", "updated"]
 
 # Columns the user owns (or that are expensively cached); a source re-fetch must never overwrite
-# them — none appear in the upsert's INSERT/DO UPDATE, so they default on insert + persist on
-# conflict. full_description is fetched on demand (Internshala's real JD) and must not be
-# clobbered by the source's short listing text.
+# them — none appear in the upsert's INSERT, so they default on insert + persist on conflict.
+# full_description is fetched on demand (Internshala's real JD) and must not be clobbered by the
+# source's short listing text. The one exception: the upsert clears it when the same source moves
+# the row to a new url, because the cache then describes the old (usually closed) posting.
 _USER_FLAG_FIELDS = frozenset(
     {"applied", "bookmarked", "hidden", "seen", "notes", "extra_context", "full_description"}
 )
@@ -40,9 +43,28 @@ _SORT_SQL = {
     "company": "company COLLATE NOCASE ASC, title COLLATE NOCASE ASC",
 }
 
-# INSERT ... ON CONFLICT DO UPDATE. The DO UPDATE set deliberately EXCLUDES source,
-# source_native_id, url, first_seen_at (first-seen provenance) and every user flag.
-_UPSERT_SQL = """
+# INSERT ... ON CONFLICT DO UPDATE. The DO UPDATE set deliberately EXCLUDES source, first_seen_at
+# (first-seen provenance) and every user flag.
+# url/source_native_id: Internshala and Unstop close a posting and repost the same title under a
+# new id. The repost hashes to the same job_uid, so a frozen url kept the row 'active' while its
+# link opened the closed original (2026-09-15 audit: 10 of 22 sampled Internshala rows, 9 of 69
+# Unstop rows, one of them an applied row). So the SAME source's latest link wins, and the cached
+# full_description is dropped when that link changes. A DIFFERENT source keeps the first-seen link,
+# so cross-source dedup still credits the source that found the posting first. SQLite evaluates
+# every SET expression against the pre-update row, so `jobs.url` below is the stored url.
+# A relink needs a NEW posting id, not just a new link string: Adzuna and Jooble links carry a
+# per-request token ("se=", "pos=") that changes on every run, and a daily relink would reset the
+# closure check each time. A source with no id (LinkedIn) relinks on a changed link.
+# No relink on an applied or bookmarked row: its link and cached JD are the only record of the
+# posting he acted on. No second relink in one run: two open postings with the same company,
+# title and location would swap the link on every upsert and reset the closure check each run.
+_RELINKED = (
+    "excluded.source = jobs.source AND jobs.applied = 0 AND jobs.bookmarked = 0"
+    " AND jobs.last_seen_cycle IS NOT excluded.last_seen_cycle"
+    " AND (excluded.source_native_id IS NOT jobs.source_native_id"
+    " OR (excluded.source_native_id IS NULL AND excluded.url IS NOT jobs.url))"
+)
+_UPSERT_SQL = f"""
 INSERT INTO jobs (
     job_uid, source, source_native_id, title, company, location, is_remote, url,
     description, salary_min, salary_max, salary_currency, salary_period, salary_raw,
@@ -63,8 +85,13 @@ ON CONFLICT(job_uid) DO UPDATE SET
     salary_currency=excluded.salary_currency, salary_period=excluded.salary_period,
     salary_raw=excluded.salary_raw, salary_parsed=excluded.salary_parsed,
     salary_bucket=excluded.salary_bucket, match_score=excluded.match_score,
-    is_internship=excluded.is_internship, posted_at=excluded.posted_at
-    -- NOT updated: source, source_native_id, url, first_seen_at (provenance);
+    is_internship=excluded.is_internship, posted_at=excluded.posted_at,
+    url=CASE WHEN {_RELINKED} THEN excluded.url ELSE jobs.url END,
+    source_native_id=CASE WHEN {_RELINKED}
+        THEN excluded.source_native_id ELSE jobs.source_native_id END,
+    full_description=CASE WHEN {_RELINKED} THEN NULL ELSE jobs.full_description END,
+    closure_checked_at=CASE WHEN {_RELINKED} THEN NULL ELSE jobs.closure_checked_at END
+    -- NOT updated: source, first_seen_at (provenance);
     --             applied, bookmarked, hidden, notes (USER FLAGS MUST SURVIVE UPSERTS)
 """
 
@@ -121,8 +148,8 @@ def _build_where(
 ) -> tuple[str, dict[str, object]]:
     """Assemble a parameterized WHERE clause shared by get_jobs + count_jobs.
 
-    Default (status is None) hides soft-deleted rows; `include_hidden=False` also drops hidden.
-    All values bind as params — nothing here is interpolated.
+    Default (status is None) hides soft-deleted and stale rows; `include_hidden=False` also drops
+    hidden, and `include_hidden=True` brings stale rows back. All values bind as params.
     """
     clauses: list[str] = []
     params: dict[str, object] = {}
@@ -155,7 +182,16 @@ def _build_where(
             # Explicit empty list => match nothing (avoids invalid `IN ()`).
             clauses.append("1 = 0")
     else:
-        clauses.append("status != 'deleted'")
+        # A stale row went missing from its source's last successful fetch. For exhaustive,
+        # open-only fetches that means closed or removed (2026-09-15 audit: 7 of 8 checked Unstop
+        # stale rows were closed), yet it stayed listed for grace_days. Hiding it costs 20 of
+        # 1,358 visible rows. It is not deleted: "show hidden" still lists it, and a re-sighting
+        # makes it active again. An applied or bookmarked stale row stays listed.
+        clauses.append(
+            "status != 'deleted'"
+            if include_hidden
+            else "status != 'deleted' AND (status != 'stale' OR applied = 1 OR bookmarked = 1)"
+        )
     if not include_hidden:
         clauses.append("hidden = 0")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -277,6 +313,40 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         is_internship=bool(row["is_internship"]),
         posted_at=None if posted is None else datetime.fromisoformat(posted),
     )
+
+
+def refilter_candidates(conn: sqlite3.Connection) -> list[Job]:
+    """Stored rows the runner may retire when they fail today's filters: not deleted, and not
+    applied or bookmarked (the owner acted on those, so no config change may remove them).
+
+    The description is the cached full_description when present: it is the posting's real text,
+    and the listing text (an Internshala slug, a 500-character preview) often omits the stipend
+    or duration line that the filters read.
+    """
+    rows = conn.execute(
+        "SELECT * FROM jobs WHERE status != 'deleted' AND applied = 0 AND bookmarked = 0"
+    ).fetchall()
+    jobs: list[Job] = []
+    for row in rows:
+        job = _row_to_job(row)
+        job.description = row["full_description"] or job.description
+        jobs.append(job)
+    return jobs
+
+
+def retire_jobs(conn: sqlite3.Connection, job_uids: list[str]) -> int:
+    """Soft-delete these jobs in one transaction and return how many rows changed.
+
+    The applied/bookmarked guard is repeated in the UPDATE: the dashboard can flag a row between
+    refilter_candidates and this call, and a flagged row must never disappear.
+    """
+    cur = conn.executemany(
+        "UPDATE jobs SET status = 'deleted' "
+        "WHERE job_uid = ? AND status != 'deleted' AND applied = 0 AND bookmarked = 0",
+        [(uid,) for uid in job_uids],
+    )
+    conn.commit()
+    return cur.rowcount
 
 
 def jobs_new_in_run(conn: sqlite3.Connection, run_id: int) -> list[Job]:

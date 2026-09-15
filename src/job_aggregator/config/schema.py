@@ -34,6 +34,10 @@ class Keywords(BaseModel):
     # blurb like "10+ years serving clients" can false-match; we accept rare false drops over
     # a feed half-full of out-of-reach roles. Internships are always exempt.
     max_experience_years: int = Field(default=2, ge=0)
+    # max_internship_months: drop an INTERNSHIP whose text states a duration longer than this many
+    # months (a 6-month internship at a low stipend is the trap the owner avoids). A posting that
+    # states no duration is kept. 0 disables the gate. See pipeline/signals.internship_months.
+    max_internship_months: int = Field(default=4, ge=0)
 
 
 class SalaryConfig(BaseModel):
@@ -44,8 +48,10 @@ class SalaryConfig(BaseModel):
     min_in_office: int = Field(default=80000, ge=0)
     # Floor for INTERNSHIPS specifically (both remote and in-office). Indian internship stipends
     # sit far below any full-time floor — min_remote=30k dropped real "SDE Intern" posts (verified
-    # live). 0 = never drop an internship on pay; scoring still ranks paid ones higher.
-    min_internship: int = Field(default=0, ge=0)
+    # live). 12,000 is the owner's own floor (2026-09-15). The gate reads the TOP of a stated range
+    # and never touches a posting that states no pay: silence is not a low stipend. An adapter
+    # that reads "unpaid" stores 0, which fails any floor above 0. 0 = never drop on pay.
+    min_internship: int = Field(default=12000, ge=0)
     on_missing: Literal["keep_and_flag", "drop"] = "keep_and_flag"
     demote_in_office_if_unknown: bool = True
     # Approximate FX rates to normalize foreign pay to INR/month; user-updatable.
@@ -64,6 +70,11 @@ class ScheduleConfig(BaseModel):
     # their jobs only go stale once the posting itself is older than this many days (then the
     # normal grace_days delete applies). Exhaustive sources keep pure absence-based expiry.
     windowed_retire_days: int = Field(default=30, ge=1)
+    # Closed postings a source keeps returning (or a windowed source stops returning) stay visible
+    # for weeks. After each run, check at most this many visible postings against their original
+    # page, oldest check first, and retire the ones that say applications are closed. 0 disables.
+    # Each check is one polite request to the source site. See sources/closure.py.
+    closure_checks_per_run: int = Field(default=25, ge=0)
 
 
 class JobSpyConfig(BaseModel):

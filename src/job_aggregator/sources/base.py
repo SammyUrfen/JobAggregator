@@ -48,6 +48,11 @@ class RawPosting:
     salary_currency: str | None = None
     salary_period: str | None = None  # 'year' | 'month' | 'week' | 'day' | 'hour' | None
     posted_at: datetime | None = None  # parsed aware-datetime
+    # The location that goes into job_uid, when it must differ from the shown `location`. None
+    # means "hash `location`". job_uid keys the owner's applied/seen marks, so an adapter that
+    # starts reading a better location keeps hashing the old one: re-keyed rows lost their
+    # applied mark and came back as "new" (review 2026-09-15, an applied Unstop row).
+    uid_location: str | None = None
 
 
 @dataclass
@@ -114,7 +119,9 @@ def to_job(raw: RawPosting) -> Job:
     """Assemble a Job from a RawPosting. `job_uid` is the cross-source content hash; the URL is
     canonicalized; `salary_bucket` is left None (the runner sets it uniformly before filtering)."""
     return Job(
-        job_uid=content_hash(raw.company, raw.title, raw.location),
+        job_uid=content_hash(
+            raw.company, raw.title, raw.location if raw.uid_location is None else raw.uid_location
+        ),
         source=raw.source,
         source_native_id=raw.source_native_id,
         title=clean_text(raw.title) or raw.title.strip(),

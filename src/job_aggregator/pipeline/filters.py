@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from job_aggregator.models.job import Job, SalaryBucket
+from job_aggregator.pipeline import signals
 from job_aggregator.pipeline.dedup import norm_location
+from job_aggregator.pipeline.salary import representative_inr
 
 if TYPE_CHECKING:
     from job_aggregator.config.schema import Config
@@ -97,14 +99,15 @@ def _location_ok(job: Job, cfg: Config) -> bool:
     jl = norm_location(job.location)
     if not jl:  # unknown location -> don't hard-drop
         return True
-    job_tokens = set(jl.split())
+    # Only words that name a place can match. "Remote" named no place, yet it let "Remote - US"
+    # overlap the configured "Remote - India" (review 2026-09-15).
+    places = set(jl.split()) - signals.PLACELESS_WORDS
+    if not places:  # "Remote", "Worldwide": the posting limits the hire to no place
+        return True
     for loc in cfg.locations:
-        nl = norm_location(loc)
-        if not nl or nl == "remote":
-            continue
         # Whole-token overlap only — a raw substring match wrongly admits "Indiana, USA" for a
         # configured "India" (norm 'india' is a substring of 'indiana').
-        if set(nl.split()) & job_tokens:
+        if (set(norm_location(loc).split()) - signals.PLACELESS_WORDS) & places:
             return True
     return False
 
@@ -112,8 +115,9 @@ def _location_ok(job: Job, cfg: Config) -> bool:
 def _hard_drop_reason(  # noqa: PLR0911 - one early return per gate is the readable shape here
     job: Job, cfg: Config, *, title_lc: str, hay: str, title_roles: list[str], desc_roles: list[str]
 ) -> str | None:
-    """The first disqualifying reason (exclude → level → role → domain → experience → location),
-    or None if the job clears every hard gate. Salary is handled separately (it can flag)."""
+    """The first disqualifying reason (exclude → level → role → domain → experience → unpaid →
+    duration → location), or None if the job clears every hard gate. Salary is handled
+    separately (it can flag)."""
     kw = cfg.keywords
     for ex in kw.exclude:  # 1. hard excludes (title only)
         if _matches(title_lc, ex):
@@ -139,6 +143,20 @@ def _hard_drop_reason(  # noqa: PLR0911 - one early return per gate is the reada
         yrs = required_years(hay)
         if yrs is not None and yrs > kw.max_experience_years:
             return f"experience:{yrs}y"
+    # 3d. unpaid: the posting SAYS it pays nothing. Silence is not unpaid (signals never reads a
+    # missing stipend as a no). A positive salary from the source's own field outranks the text:
+    # "unpaid for the first week" on a paid role must not drop it. Raw text, not `hay`:
+    # signals.flatten decodes entities before lowercasing.
+    text = f"{job.title}\n{job.description or ''}"
+    paid = (representative_inr(job.salary_min, job.salary_max) or 0) > 0
+    if not paid and signals.says_unpaid(text):
+        return "unpaid"
+    # 3e. duration: an internship that states a commitment longer than the owner's cap. A posting
+    # that states no duration is kept; 0 disables the gate. Full-time roles have no "duration".
+    if job.is_internship and kw.max_internship_months > 0:
+        months = signals.internship_months(text)
+        if months is not None and months > kw.max_internship_months:
+            return f"duration:{months:g}m"
     if not _location_ok(job, cfg):
         return "location_mismatch"  # 4. location
     return None

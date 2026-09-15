@@ -294,7 +294,9 @@ def test_unstop_maps_details_skills_function_as_description(now_clock: FixedCloc
     assert "Build data pipelines in Python." in job.description
     assert "Skills: Python, SQL" in job.description
     assert "Function: Backend Development" in job.description
-    assert job.is_remote is True  # region "online"
+    # region "online" is on every Unstop item and says nothing about the work: no jobDetail.type
+    # and no mode in the text -> unknown (tests/test_unstop_quality.py covers the mode mapping).
+    assert job.is_remote is None
 
 
 # ── get_json retry/backoff ──────────────────────────────────────────────────────────────
